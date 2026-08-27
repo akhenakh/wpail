@@ -2,6 +2,10 @@
 
 **wpail** answers the question *what port/application is listening?* — like `lsof -i :PORT` or `ss -ltnp`, but purpose-built, fast, and with an interactive UI.
 
+![wpaillist](img/wpaillist.png)
+
+![wpaildetail](img/wpaildetail.png)
+
 It is built for developers: instead of a bare PID or a cryptic temp path, wpail identifies **your application** — a listener started with `go run .` shows up under its project name (e.g. `github.com/akhenakh/listener (go run)`), with toolchain, project directory and VCS state one keypress away.
 
 It reads the kernel tables directly (no shelling out to other tools), so it stays self-contained. Supported platforms:
