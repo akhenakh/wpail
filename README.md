@@ -13,6 +13,14 @@ It reads the kernel tables directly (no shelling out to other tools), so it stay
 - **Linux** — reads procfs (`/proc/net/*`, `/proc/<pid>/fd`), builds without cgo.
 - **macOS (Apple Silicon, arm64)** — walks process file descriptors through `libproc`; requires a C toolchain (the Xcode Command Line Tools, already present on any dev machine).
 
+## Install
+
+With [Homebrew](https://brew.sh) (macOS Apple Silicon and Linux):
+
+```sh
+brew install akhenakh/tap/wpail
+```
+
 ## Usage
 
 ```sh

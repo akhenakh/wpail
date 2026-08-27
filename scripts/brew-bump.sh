@@ -45,6 +45,11 @@ class ${CLASS} < Formula
   homepage "https://github.com/${REPO}"
   license "${LICENSE}"
 
+  # Fallback for contexts with no dedicated build — there is no Darwin
+  # x86_64 tarball since wpail is arm64-only on macOS by design.
+  url "https://github.com/${REPO}/releases/download/${TAG}/${BIN}_Linux_x86_64.tar.gz"
+  sha256 "${LINUX_AMD64}"
+
   on_macos do
     on_arm do
       url "https://github.com/${REPO}/releases/download/${TAG}/${BIN}_Darwin_arm64.tar.gz"
@@ -56,10 +61,6 @@ class ${CLASS} < Formula
     on_arm do
       url "https://github.com/${REPO}/releases/download/${TAG}/${BIN}_Linux_arm64.tar.gz"
       sha256 "${LINUX_ARM64}"
-    end
-    on_intel do
-      url "https://github.com/${REPO}/releases/download/${TAG}/${BIN}_Linux_x86_64.tar.gz"
-      sha256 "${LINUX_AMD64}"
     end
   end
 
