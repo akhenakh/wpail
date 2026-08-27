@@ -1,6 +1,8 @@
 # wpail
 
-**wpail** answers the question *what application is listening on this port?* — like `lsof -i :PORT` or `ss -ltnp`, but purpose-built, fast, and with an interactive UI.
+**wpail** answers the question *what port/application is listening?* — like `lsof -i :PORT` or `ss -ltnp`, but purpose-built, fast, and with an interactive UI.
+
+It is built for developers: instead of a bare PID or a cryptic temp path, wpail identifies **your application** — a listener started with `go run .` shows up under its project name (e.g. `github.com/akhenakh/listener (go run)`), with toolchain, project directory and VCS state one keypress away.
 
 It reads the kernel tables directly (no shelling out to other tools), so it stays self-contained. Supported platforms:
 
@@ -14,6 +16,7 @@ wpail              # interactive TUI over every listener (default with no args)
 wpail -t 6666      # same TUI, filtered to one port
 wpail 6666         # PIDs listening on TCP/UDP port 6666, one per line
 wpail -u 6666      # PID + owning user
+wpail -v 6666      # verbose: PID, user, build metadata per listener
 ```
 
 Exit codes: `0` found, `1` nothing found / scan error, `2` usage error.
@@ -22,6 +25,33 @@ Exit codes: `0` found, `1` nothing found / scan error, `2` usage error.
 
 Both TCP and UDP sockets whose **local** port equals the argument — TCP only counts the LISTEN state; UDP has no listen state so any bound socket matches. IPv4 and IPv6 (`tcp6`, `udp6`) are included.
 
+## Developer builds
+
+Temp binaries from `go run .` or `cargo run` are identified instead of shown
+as cryptic temp paths. The list view labels them with the **full module
+path** — `github.com/akhenakh/listener (go run)` — falling back to the short
+project name when the path would be too long. The process detail view has a
+**Build** block with module path, toolchain, project directory and VCS
+state, and `wpail -v PORT` prints the same per PID:
+
+```
+PID     USER  BUILD     PROJECT   RUNTIME              VCS         DIR
+417913  akh   go run    listener  go1.27.0             main b784*  /home/akh/dev/listener
+417940  akh   cargo     listener  rustc 1.95.0 (5980…  -           /home/akh/dev/listener
+```
+
+Everything is agentless, read straight from the binaries:
+
+- **Go** — the embedded buildinfo blob (`debug/buildinfo`): main module
+  path, Go version, VCS revision/branch and dirty flag. Survives `-s -w`
+  and stays readable after `go run` unlinks the temp binary, since wpail
+  opens the live `/proc/<pid>/exe` inode.
+- **Rust** — the ELF `.comment` section (`rustc version …`, survives
+  `strip --strip-all`), `target/{debug,release}` path conventions and
+  `Cargo.toml` for the project name.
+- **Zig** — `.comment` (`zig X.Y.Z`, debug builds only), `zig-out/bin`
+  and the `zig run` cache paths.
+
 ## Interactive mode
 
 `wpail -t` shows a live table of listeners: port, protocols, local address(es), PID(s), process and user.
@@ -29,7 +59,7 @@ Both TCP and UDP sockets whose **local** port equals the argument — TCP only c
 | Key | Action |
 |---|---|
 | `↓/↑`, `j`, `g/G` | move selection |
-| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, all bound ports |
+| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
 | `k` | send a signal — a dialog opens to pick SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT or SIGSTOP |
 | `r` | refresh now (the list also auto-refreshes every 2 s) |
 | `q` / `ctrl+c` | quit |
@@ -46,6 +76,8 @@ Requires Go 1.27+ (and on macOS, the Xcode Command Line Tools for cgo).
 task build       # binary in bin/wpail (static on Linux, links libSystem on macOS)
 task check       # vet + go fix + tests + build
 task test        # unit tests only
+task listener    # launch the dev listener fixture app (`go run .`, port 18081),
+                 # then inspect it: task run -- -v 18081
 ```
 
 Or without task:
@@ -74,6 +106,8 @@ On macOS keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks the libproc
 ```
 main.go           CLI parsing, output rendering, signal delivery
 listen/           platform-neutral snapshot API + per-OS scanners (procfs / libproc)
+bininfo/          agentless build metadata from process binaries (go/rust/zig)
+dev/listener/     standalone fixture app (`task listener`) for trying wpail out
 tui/              Bubble Tea v2 model/view/update, lipgloss styling
 ```
 

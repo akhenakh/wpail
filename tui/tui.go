@@ -55,6 +55,7 @@ type Detail struct {
 	Exe     string
 	Memory  string
 	Ports   []BoundPort
+	Build   [][2]string // build metadata key/value pairs, render order
 	CanKill bool
 	Error   string // non-empty when inspection failed
 }

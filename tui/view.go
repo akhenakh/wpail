@@ -201,6 +201,13 @@ func (m Model) detailText(d *Detail) string {
 	if d.Error != "" {
 		lines = append(lines, "", noteErrStyle.Render(d.Error))
 	}
+	if len(d.Build) > 0 {
+		lines = append(lines, "", fieldLabel.Render("Build"))
+		for _, kv := range d.Build {
+			lines = append(lines, "  "+dimStyle.Render(pad(kv[0], 9))+
+				truncate(kv[1], max(m.width-16, 20)))
+		}
+	}
 	if len(d.Ports) > 0 {
 		lines = append(lines, "", fieldLabel.Render("Listening on"))
 		for _, p := range d.Ports {

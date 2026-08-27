@@ -51,7 +51,7 @@ func TestForeignPortMessageTakesPriorityOverEmpty(t *testing.T) {
 	}
 
 	var out, errW bytes.Buffer
-	code := renderCLI(&out, &errW, snap, 631, false)
+	code := renderCLI(&out, &errW, snap, 631, pidsOnly)
 
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
@@ -78,7 +78,7 @@ func TestTrulyEmptyPortMessage(t *testing.T) {
 	}
 
 	var out, errW bytes.Buffer
-	code := renderCLI(&out, &errW, snap, 631, false)
+	code := renderCLI(&out, &errW, snap, 631, pidsOnly)
 
 	if code != 1 || !strings.Contains(errW.String(), "nothing is listening on port 631") {
 		t.Fatalf("code=%d message=%q", code, errW.String())
@@ -112,7 +112,7 @@ func TestRenderCLIPrintsOwnedPIDsAndFlagStrangers(t *testing.T) {
 	}
 
 	var out, errW bytes.Buffer
-	code := renderCLI(&out, &errW, snap, 8080, true)
+	code := renderCLI(&out, &errW, snap, 8080, users)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errW.String())
 	}

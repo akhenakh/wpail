@@ -41,6 +41,9 @@ func detailAt(root string, pid int) (*Process, error) {
 	if exe, err := os.Readlink(filepath.Join(dir, "exe")); err == nil {
 		p.Exe = strings.TrimSuffix(exe, " (deleted)")
 	}
+	if cwd, err := os.Readlink(filepath.Join(dir, "cwd")); err == nil {
+		p.CWD = cwd
+	}
 	return p, nil
 }
 

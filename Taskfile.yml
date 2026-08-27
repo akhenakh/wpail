@@ -18,6 +18,7 @@ tasks:
     sources:
       - "*.go"
       - listen/*.go
+      - bininfo/*.go
       - tui/*.go
       - go.mod
       - go.sum
@@ -56,6 +57,12 @@ tasks:
     desc: Reconcile go.mod/go.sum
     cmds:
       - go mod tidy
+
+  listener:
+    desc: Run the dev listener fixture app (`go run .`, port 18081) to test wpail against — override with `-- -port 9000`
+    dir: dev/listener
+    cmds:
+      - go run . {{.CLI_ARGS}}
 
   run:
     desc: Run against this machine — pass args after -- e.g. `task run -- 6666`

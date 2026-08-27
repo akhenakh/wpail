@@ -47,6 +47,7 @@ type Process struct {
 	Comm    string
 	Cmdline string
 	Exe     string
+	CWD     string // working directory; empty when unavailable
 	RSSKB   uint64 // resident set size in KB; 0 when unavailable
 }
 
