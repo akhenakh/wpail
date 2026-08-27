@@ -409,12 +409,21 @@ func printUsers(w io.Writer, pids []int) error {
 	return nil
 }
 
+// prevRow remembers the dev labels resolved for one port's owner set so
+// periodic rescans skip re-reading process details and binaries unless the
+// set of listening processes changed (a new app showed up).
+type prevRow struct {
+	pids  []int
+	names []string
+}
+
 func startTUI(port uint16) int {
 	selfUID := uint32(os.Geteuid())
 	cache := newBinCache()
 
 	var mu sync.Mutex
 	var lastSnap *listen.Snapshot
+	prevRows := map[uint16]prevRow{}
 
 	cfg := tui.Config{
 		Port:    port,
@@ -430,8 +439,27 @@ func startTUI(port uint16) int {
 			lastSnap = snap
 			mu.Unlock()
 			rows := snap.Rows(filter)
+			current := make(map[uint16]bool, len(rows))
 			for i := range rows {
+				current[rows[i].Port] = true
+				if prev, ok := prevRows[rows[i].Port]; ok && slices.Equal(prev.pids, rows[i].PIDs) {
+					// Same app(s) as the last scan: reuse the already
+					// resolved labels instead of reprocessing binaries.
+					copy(rows[i].Names, prev.names)
+					continue
+				}
 				relabelRow(&rows[i], listen.Detail, cache)
+				if !slices.Contains(rows[i].Names, "?") {
+					prevRows[rows[i].Port] = prevRow{
+						pids:  slices.Clone(rows[i].PIDs),
+						names: slices.Clone(rows[i].Names),
+					}
+				}
+			}
+			for port := range prevRows {
+				if !current[port] {
+					delete(prevRows, port)
+				}
 			}
 			items := make([]tui.Item, len(rows))
 			for i, r := range rows {
