@@ -1,0 +1,58 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # Linux reads procfs and builds without cgo.
+  - id: wpail-linux
+    main: .
+    binary: wpail
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  # macOS walks process fds through libproc (cgo), Apple Silicon only.
+  - id: wpail-darwin
+    main: .
+    binary: wpail
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    goos:
+      - darwin
+    goarch:
+      - arm64
+
+archives:
+  - id: default
+    ids:
+      - wpail-linux
+      - wpail-darwin
+    formats: ['tar.gz']
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
