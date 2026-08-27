@@ -5,7 +5,6 @@ package listen
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -17,7 +16,7 @@ import (
 func ownersAt(root string, socks []Socket) map[int][]Socket {
 	byInode := make(map[uint64][]Socket, len(socks))
 	for _, s := range socks {
-		byInode[s.Inode] = append(byInode[s.Inode], s)
+		byInode[s.Key] = append(byInode[s.Key], s)
 	}
 
 	res := make(map[int][]Socket)
@@ -51,15 +50,6 @@ func ownersAt(root string, socks []Socket) map[int][]Socket {
 		sortSockets(res[pid])
 	}
 	return res
-}
-
-func sortSockets(s []Socket) {
-	slices.SortFunc(s, func(a, b Socket) int {
-		if a.Port != b.Port {
-			return int(a.Port) - int(b.Port)
-		}
-		return strings.Compare(a.Proto, b.Proto)
-	})
 }
 
 // socketInode parses "socket:[12345]" into 12345.

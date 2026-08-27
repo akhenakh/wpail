@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || (darwin && arm64)
 
 // Package tui renders the wpail interactive UI on Bubble Tea v2.
 package tui

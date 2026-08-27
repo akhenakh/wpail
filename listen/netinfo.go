@@ -1,7 +1,5 @@
 //go:build linux
 
-// Package listen discovers which processes are listening on TCP/UDP ports by
-// reading procfs directly, without shelling out to lsof or ss.
 package listen
 
 import (
@@ -15,28 +13,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-// Socket is one listening entry reported by /proc/net/{tcp,tcp6,udp,udp6}.
-type Socket struct {
-	Proto string // tcp, tcp6, udp, udp6
-	Local net.IP
-	Port  uint16
-	Inode uint64
-	UID   uint32
-}
-
-// String renders the socket as proto://ip:port, bracketing IPv6 addresses.
-func (s Socket) String() string {
-	return fmt.Sprintf("%s://%s:%d", s.Proto, FormatIP(s.Local), s.Port)
-}
-
-// FormatIP renders ip for display, wrapping IPv6 addresses in brackets.
-func FormatIP(ip net.IP) string {
-	if v4 := ip.To4(); v4 != nil {
-		return v4.String()
-	}
-	return "[" + ip.String() + "]"
-}
 
 type netTable struct {
 	file       string
@@ -112,7 +88,7 @@ func parseTable(r io.Reader, proto string, listenOnly bool) ([]Socket, error) {
 			Proto: proto,
 			Local: hexIP(ipHex),
 			Port:  uint16(port),
-			Inode: inode,
+			Key:   inode,
 			UID:   uint32(uid),
 		})
 	}

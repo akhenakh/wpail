@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || (darwin && arm64)
 
 // Command wpail reports which application is listening on a TCP/UDP port.
 //

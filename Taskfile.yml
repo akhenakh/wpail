@@ -3,12 +3,18 @@ version: "3"
 vars:
   BIN: bin/wpail
   LDFLAGS: -s -w
+  # macOS uses a cgo backend (libproc); Linux builds stay static.
+  GOOS:
+    sh: go env GOOS
+  CGO_ENABLED:
+    sh: |
+      case "$(go env GOOS)" in darwin) echo 1 ;; *) echo 0 ;; esac
 
 tasks:
   build:
-    desc: Build a static stripped binary into bin/
+    desc: Build a stripped binary into bin/
     cmds:
-      - CGO_ENABLED=0 go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.BIN}} .
+      - CGO_ENABLED={{.CGO_ENABLED}} go build -trimpath -ldflags "{{.LDFLAGS}}" -o {{.BIN}} .
     sources:
       - "*.go"
       - listen/*.go
@@ -59,7 +65,7 @@ tasks:
   install-bin:
     desc: Install into $GOPATH/bin
     cmds:
-      - CGO_ENABLED=0 go install -trimpath .
+      - CGO_ENABLED={{.CGO_ENABLED}} go install -trimpath .
 
   clean:
     desc: Remove build artifacts

@@ -10,39 +10,6 @@ import (
 	"strings"
 )
 
-// Process describes an OS process, used for detail views and CLI reporting.
-type Process struct {
-	PID     int
-	UID     uint32
-	User    string
-	Comm    string
-	Cmdline string
-	Exe     string
-	RSSKB   uint64 // resident set size in KB from VmRSS; 0 when unavailable
-}
-
-// Name prefers the full command line over the bare executable name.
-func (p Process) Name() string {
-	if c := strings.TrimSpace(p.Cmdline); c != "" {
-		return c
-	}
-	return p.Comm
-}
-
-// Memory renders VmRSS in human readable units.
-func (p Process) Memory() string {
-	switch kb := p.RSSKB; {
-	case kb == 0:
-		return "n/a"
-	case kb < 1024:
-		return fmt.Sprintf("%d KB", kb)
-	case kb < 1024*1024:
-		return fmt.Sprintf("%.1f MB", float64(kb)/1024)
-	default:
-		return fmt.Sprintf("%.2f GB", float64(kb)/(1024*1024))
-	}
-}
-
 // Detail loads information about a live process from /proc.
 func Detail(pid int) (*Process, error) { return detailAt(procFS, pid) }
 

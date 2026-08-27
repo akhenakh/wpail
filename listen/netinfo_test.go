@@ -79,8 +79,8 @@ func TestParseTableTCPKeepsListenersOnly(t *testing.T) {
 	switch {
 	case s.Port != 8080:
 		t.Errorf("Port = %d, want 8080", s.Port)
-	case s.Inode != 100:
-		t.Errorf("Inode = %d, want 100", s.Inode)
+	case s.Key != 100:
+		t.Errorf("Key = %d, want 100", s.Key)
 	case s.UID != 1000:
 		t.Errorf("UID = %d, want 1000", s.UID)
 	case s.Proto != "tcp":
@@ -98,7 +98,7 @@ func TestParseTableUDPKeepsAllStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Proto != "udp" || got[0].Inode != 300 || got[0].UID != 105 {
+	if len(got) != 1 || got[0].Proto != "udp" || got[0].Key != 300 || got[0].UID != 105 {
 		t.Fatalf("unexpected parse result: %+v (err=%v)", got, err)
 	}
 }
