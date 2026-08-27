@@ -308,3 +308,82 @@ func TestShortenCommand(t *testing.T) {
 		t.Errorf("privileged fallback = %q", got)
 	}
 }
+
+func TestMouseClickActivatesRow(t *testing.T) {
+	h := newHarness(t)
+
+	// Rows sit below title, blank line and header: Y=3 is nginx, Y=4 postgres.
+	cmd := h.feed(tea.MouseClickMsg{Button: tea.MouseLeft, Y: listDataRow + 1})
+	if h.m.cursor != 1 || h.m.mode != modeDetail {
+		t.Fatalf("click must select row 2 and open detail: cursor=%d mode=%v",
+			h.m.cursor, h.m.mode)
+	}
+	dmsg, ok := cmd().(detailMsg)
+	if !ok || dmsg.pid != 200 {
+		t.Fatalf("click activation must request detail for pid 200, got %T %+v", cmd(), cmd())
+	}
+}
+
+func TestMouseClickOutsideRowsIgnored(t *testing.T) {
+	h := newHarness(t)
+
+	for _, y := range []int{0, 2, listDataRow + 5, listDataRow + 30} {
+		if cmd := h.feed(tea.MouseClickMsg{Button: tea.MouseLeft, Y: y}); cmd != nil {
+			t.Errorf("click at y=%d must be ignored, got cmd %T", y, cmd)
+		}
+		if h.m.cursor != 0 || h.m.mode != modeList {
+			t.Fatalf("click at y=%d changed state: cursor=%d mode=%v",
+				y, h.m.cursor, h.m.mode)
+		}
+	}
+
+	if cmd := h.feed(tea.MouseClickMsg{Button: tea.MouseRight, Y: listDataRow}); cmd != nil {
+		t.Errorf("right click must be ignored, got cmd %T", cmd)
+	}
+	if h.m.mode != modeList {
+		t.Fatalf("right click changed mode to %v", h.m.mode)
+	}
+}
+
+func TestMouseClickIgnoredOutsideListMode(t *testing.T) {
+	h := newHarness(t)
+	h.feed(tea.KeyPressMsg{Code: tea.KeyEnter}) // detail mode, loading
+	if h.m.mode != modeDetail {
+		t.Fatalf("precondition: mode=%v", h.m.mode)
+	}
+
+	if cmd := h.feed(tea.MouseClickMsg{Button: tea.MouseLeft, Y: listDataRow}); cmd != nil {
+		t.Errorf("click in detail mode must be ignored, got cmd %T", cmd)
+	}
+	if h.m.mode != modeDetail {
+		t.Fatalf("click must not leave detail mode, got %v", h.m.mode)
+	}
+}
+
+func TestMouseWheelScrollsList(t *testing.T) {
+	h := newHarness(t)
+
+	h.feed(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if h.m.cursor != 1 {
+		t.Fatalf("wheel down = cursor %d, want 1", h.m.cursor)
+	}
+	h.feed(tea.MouseWheelMsg{Button: tea.MouseWheelDown}) // clamps at the last row
+	if h.m.cursor != 1 {
+		t.Fatalf("wheel down must clamp: cursor=%d", h.m.cursor)
+	}
+	h.feed(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if h.m.cursor != 0 {
+		t.Fatalf("wheel up = cursor %d, want 0", h.m.cursor)
+	}
+	h.feed(tea.MouseWheelMsg{Button: tea.MouseWheelUp}) // clamps at the first row
+	if h.m.cursor != 0 {
+		t.Fatalf("wheel up must clamp: cursor=%d", h.m.cursor)
+	}
+}
+
+func TestViewEnablesMouse(t *testing.T) {
+	m := newModel(Config{})
+	if v := m.View(); v.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("MouseMode = %v, want MouseModeCellMotion", v.MouseMode)
+	}
+}

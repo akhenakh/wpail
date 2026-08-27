@@ -168,7 +168,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.rescanCmd()
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.MouseClickMsg:
+		return m.mouseClick(msg)
+	case tea.MouseWheelMsg:
+		return m.mouseWheel(msg)
 	}
+	return m, nil
+}
+
+// mouseClick selects and activates the clicked list row, mirroring Enter.
+// Clicks anywhere else (header, footer, empty space, other modes) and
+// non-left buttons are ignored.
+func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return m, nil
+	}
+	i, ok := m.rowAt(msg.Y)
+	if !ok {
+		return m, nil
+	}
+	m.cursor = i
+	return m.openDetail()
+}
+
+// mouseWheel scrolls the list: wheel up walks toward earlier rows, wheel
+// down toward later ones.
+func (m Model) mouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.mode != modeList {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		m.cursor--
+	case tea.MouseWheelDown:
+		m.cursor++
+	default:
+		return m, nil
+	}
+	m.clampCursor()
 	return m, nil
 }
 

@@ -17,6 +17,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
 	v.WindowTitle = "wpail"
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -97,9 +98,7 @@ func (m Model) renderTable() []string {
 	}
 	rows := []string{strings.Join(head, strings.Repeat(" ", colGap))}
 
-	budget := max(m.height-7, 1)
-	start := clampWindow(m.cursor, budget, len(m.items))
-	end := min(start+budget, len(m.items))
+	start, end, budget := m.listWindow()
 
 	for i := start; i < end; i++ {
 		item := m.items[i]
@@ -150,6 +149,34 @@ func clampWindow(cursor, budget, total int) int {
 		start = max(total-budget, 0)
 	}
 	return start
+}
+
+// listWindow returns the visible slice of the item table: [start, end) item
+// indices and the row budget. Rendering and mouse hit-testing both use it so
+// clicks always land on the row the user sees.
+func (m Model) listWindow() (start, end, budget int) {
+	budget = max(m.height-7, 1)
+	start = clampWindow(m.cursor, budget, len(m.items))
+	end = min(start+budget, len(m.items))
+	return start, end, budget
+}
+
+// listDataRow is the screen row of the first table row in list view:
+// title, blank line, then the header row sit above it.
+const listDataRow = 3
+
+// rowAt maps a screen row onto the item index shown there. ok is false when
+// the row falls outside the rendered table rows (title, header, filler,
+// footer) or the list is not showing a table at all.
+func (m Model) rowAt(y int) (int, bool) {
+	if m.mode != modeList || !m.loaded || len(m.items) == 0 {
+		return 0, false
+	}
+	start, end, _ := m.listWindow()
+	if i := start + y - listDataRow; i >= start && i < end {
+		return i, true
+	}
+	return 0, false
 }
 
 func (m Model) renderFooter() string {
