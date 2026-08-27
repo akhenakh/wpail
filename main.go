@@ -417,7 +417,9 @@ type prevRow struct {
 	names []string
 }
 
-func startTUI(port uint16) int {
+// startTUI is a var so tests can stub the interactive UI out; running the
+// real one inside a test would take over the terminal and hang the run.
+var startTUI = func(port uint16) int {
 	selfUID := uint32(os.Geteuid())
 	cache := newBinCache()
 

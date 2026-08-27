@@ -125,10 +125,20 @@ func TestRenderCLIPrintsOwnedPIDsAndFlagStrangers(t *testing.T) {
 }
 
 func TestBareInvocationDefaultsToTUI(t *testing.T) {
-	// Non-TTY stdin makes the TUI exit with an error immediately; what matters
-	// is that it dispatched to TUI (exit 1) instead of usage (2).
-	code := run([]string{})
-	if code != 1 {
-		t.Errorf("bare run() = %d, want 1 (TUI attempted)", code)
+	// Running the real TUI would block on terminal input (and hang the whole
+	// test run under a TTY), so stub it out and check the dispatch instead.
+	want := 7
+	var gotPort uint16
+	restore := startTUI
+	t.Cleanup(func() { startTUI = restore })
+	startTUI = func(port uint16) int {
+		gotPort = port
+		return want
+	}
+	if code := run([]string{}); code != want {
+		t.Errorf("bare run() = %d, want %d (TUI dispatched)", code, want)
+	}
+	if gotPort != 0 {
+		t.Errorf("bare invocation passed port %d, want 0", gotPort)
 	}
 }
