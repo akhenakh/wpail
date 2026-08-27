@@ -59,6 +59,13 @@ func parseStatus(raw string, p *Process) {
 					p.UID = uint32(v)
 				}
 			}
+		case strings.HasPrefix(line, "PPid:"):
+			fields := strings.Fields(strings.TrimPrefix(line, "PPid:"))
+			if len(fields) > 0 {
+				if v, err := strconv.ParseUint(fields[0], 10, 32); err == nil {
+					p.PPID = int(v)
+				}
+			}
 		case strings.HasPrefix(line, "VmRSS:"):
 			fields := strings.Fields(strings.TrimPrefix(line, "VmRSS:"))
 			if len(fields) >= 1 {

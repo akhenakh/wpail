@@ -48,3 +48,16 @@ func TestDetailMissingCWDIsEmpty(t *testing.T) {
 		t.Errorf("CWD = %q, want empty", p.CWD)
 	}
 }
+
+func TestParseStatusReadsPPid(t *testing.T) {
+	p := &Process{}
+	parseStatus("Name:\tdevlistener\nPPid:\t885632\nUid:\t1000\t1000\t1000\t1000\nVmRSS:\t1234 kB\n", p)
+	if p.PPID != 885632 {
+		t.Errorf("PPID = %d, want 885632", p.PPID)
+	}
+	p = &Process{}
+	parseStatus("Name:\tinit\nPPid:\t0\n", p)
+	if p.PPID != 0 {
+		t.Errorf("PPID = %d, want 0", p.PPID)
+	}
+}

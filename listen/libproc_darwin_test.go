@@ -110,6 +110,45 @@ func findRow(rows []Row, port uint16) (Row, bool) {
 	return Row{}, false
 }
 
+// TestDetailRootOwnedAncestor verifies Detail works unprivileged on
+// root-owned processes such as launchd: proc_pidinfo answers EPERM there,
+// and the ancestry walk terminates early with "unknown" placeholders if the
+// sysctl fallback did not fill the gap.
+func TestDetailRootOwnedAncestor(t *testing.T) {
+	p, err := Detail(1)
+	if err != nil {
+		t.Fatalf("Detail(1): %v", err)
+	}
+	if p.PPID != 0 {
+		t.Errorf("Detail(1).PPID = %d, want 0", p.PPID)
+	}
+	if p.Comm != "launchd" {
+		t.Errorf("Detail(1).Comm = %q, want launchd", p.Comm)
+	}
+	if p.User != "root" {
+		t.Errorf("Detail(1).User = %q, want root", p.User)
+	}
+}
+
+// TestCommString verifies fixed-size kernel comm buffers truncate at the
+// first NUL; the kernel leaves stale bytes beyond it.
+func TestCommString(t *testing.T) {
+	tests := []struct {
+		buf  []byte
+		want string
+	}{
+		{[]byte("launchd\x00ask\x00"), "launchd"},
+		{[]byte("zsh\x00"), "zsh"},
+		{[]byte("exactly16ch"), "exactly16ch"},
+		{nil, ""},
+	}
+	for _, tt := range tests {
+		if got := commString(tt.buf); got != tt.want {
+			t.Errorf("commString(%q) = %q, want %q", tt.buf, got, tt.want)
+		}
+	}
+}
+
 // TestDetailSelf verifies Detail works on the live test process.
 func TestDetailSelf(t *testing.T) {
 	p, err := Detail(os.Getpid())

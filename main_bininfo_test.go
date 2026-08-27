@@ -7,11 +7,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/akhenakh/wpail/bininfo"
 	"github.com/akhenakh/wpail/listen"
+	"github.com/akhenakh/wpail/tui"
 )
 
 func TestRelabelRowMarksDevBuilds(t *testing.T) {
@@ -145,6 +147,47 @@ func TestPrintVerboseLayout(t *testing.T) {
 	}
 	if len(lines[0]) != len(lines[1]) {
 		t.Errorf("columns not aligned: %q vs %q", lines[0], lines[1])
+	}
+}
+
+func TestAncestryWalk(t *testing.T) {
+	procs := map[int]*listen.Process{
+		1:   {PID: 1, Comm: "systemd"},
+		100: {PID: 100, PPID: 1, Cmdline: "/bin/zsh"},
+		200: {PID: 200, PPID: 100, Cmdline: "go run ."},
+		300: {PID: 300, PPID: 200, Cmdline: "/tmp/go-build1/b001/exe/devlistener"},
+		500: {PID: 500, PPID: 501, Cmdline: "cycled"}, // 501 missing → placeholder
+		600: {PID: 600, PPID: 601, Cmdline: "loop-a"}, // 601 → 600 → loop
+		601: {PID: 601, PPID: 600, Cmdline: "loop-b"},
+	}
+	detail := func(pid int) (*listen.Process, error) {
+		if p, ok := procs[pid]; ok {
+			return p, nil
+		}
+		return nil, errors.New("gone")
+	}
+
+	got := ancestry(procs[300], detail)
+	want := []tui.ProcRef{{PID: 1, Name: "systemd"}, {PID: 100, Name: "zsh"}, {PID: 200, Name: "go run"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("ancestry = %v, want %v", got, want)
+	}
+
+	// Missing ancestor terminates the walk with a placeholder.
+	got = ancestry(procs[500], detail)
+	if len(got) != 1 || got[0] != (tui.ProcRef{PID: 501, Name: "unknown"}) {
+		t.Errorf("missing-parent ancestry = %v", got)
+	}
+
+	// Cycles stop instead of looping: self is already in the seen set,
+	// so only the single parent entry is kept.
+	if got := ancestry(procs[600], detail); len(got) != 1 {
+		t.Errorf("cycle ancestry = %v, want 1 entry", got)
+	}
+
+	// A root process (PPid 0) has no ancestry.
+	if got := ancestry(procs[1], detail); len(got) != 0 {
+		t.Errorf("root ancestry = %v, want empty", got)
 	}
 }
 

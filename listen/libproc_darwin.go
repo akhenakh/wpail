@@ -86,6 +86,7 @@ static int lpf_taskinfo(int pid, void *out, size_t bytes) {
 }
 
 static unsigned int lpb_uid(const void *b) { return ((const struct proc_bsdinfo *)b)->pbi_uid; }
+static unsigned int lpb_ppid(const void *b) { return ((const struct proc_bsdinfo *)b)->pbi_ppid; }
 
 // pbi_comm is a fixed MAXCOMLEN array, not always NUL terminated.
 static void lpb_comm(const void *b, unsigned char out[16]) {
@@ -153,7 +154,7 @@ func scanLibproc() (*Snapshot, error) {
 			}
 			uid, known := uids[pid]
 			if !known {
-				uid, _, _ = pidBSDInfo(pid)
+				uid, _, _, _ = pidBSDInfo(pid)
 				uids[pid] = uid
 			}
 			sk.UID = uid
@@ -264,11 +265,17 @@ func socketOfFD(pid, fd int, info, ip []byte) (Socket, bool) {
 // kern.procargs2, mirroring the /proc based Linux backend best effort.
 func Detail(pid int) (*Process, error) {
 	p := &Process{PID: pid}
-	uid, comm, ok := pidBSDInfo(pid)
+	uid, ppid, comm, ok := pidBSDInfo(pid)
 	if !ok {
-		return nil, fmt.Errorf("process %d: %w", pid, os.ErrProcessDone)
+		// proc_pidinfo reports EPERM for root-owned processes (launchd,
+		// login, ...) when unprivileged; the kern.proc.pid sysctl is not
+		// restricted, and the ancestry walk depends on reading those.
+		if uid, ppid, comm, ok = pidBSDInfoSysctl(pid); !ok {
+			return nil, fmt.Errorf("process %d: %w", pid, os.ErrProcessDone)
+		}
 	}
 	p.UID = uid
+	p.PPID = ppid
 	p.User = UserName(uid)
 	p.Comm = strings.TrimRight(comm, "\x00")
 	exe, argv := procArgs(pid)
@@ -290,17 +297,37 @@ func taskInfoBytes(pid int) []byte {
 	return raw[:r]
 }
 
-// pidBSDInfo returns (uid, comm, ok) from PROC_PIDTBSDINFO.
-func pidBSDInfo(pid int) (uint32, string, bool) {
+// pidBSDInfo returns (uid, ppid, comm, ok) from PROC_PIDTBSDINFO.
+func pidBSDInfo(pid int) (uint32, int, string, bool) {
 	raw := make([]byte, unsafe.Sizeof(C.struct_proc_bsdinfo{}))
 	r, err := C.lpf_bsdinfo(C.int(pid), unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
 	if err != nil || r != C.int(len(raw)) {
-		return 0, "", false
+		return 0, 0, "", false
 	}
 	base := unsafe.Pointer(&raw[0])
 	comm := make([]byte, 16)
 	C.lpb_comm(base, (*C.uchar)(unsafe.Pointer(&comm[0])))
-	return uint32(C.lpb_uid(base)), string(comm), true
+	return uint32(C.lpb_uid(base)), int(C.lpb_ppid(base)), commString(comm), true
+}
+
+// commString decodes a fixed-size MAXCOMLEN kernel buffer; the kernel only
+// pads the first NUL and stale bytes beyond it leak garbage into labels.
+func commString(comm []byte) string {
+	if i := strings.IndexByte(string(comm), 0); i >= 0 {
+		return string(comm[:i])
+	}
+	return string(comm)
+}
+
+// pidBSDInfoSysctl returns (uid, ppid, comm, ok) from the kern.proc.pid
+// sysctl. Unlike PROC_PIDTBSDINFO it is readable unprivileged for any
+// process, including root-owned ones; it never carries the executable path.
+func pidBSDInfoSysctl(pid int) (uint32, int, string, bool) {
+	k, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return 0, 0, "", false
+	}
+	return k.Eproc.Ucred.Uid, int(k.Eproc.Ppid), commString(k.Proc.P_comm[:]), true
 }
 
 // procArgs resolves the executable path and argument vector of pid via the

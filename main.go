@@ -242,6 +242,47 @@ func relabelRow(r *listen.Row, detail func(int) (*listen.Process, error), cache 
 	}
 }
 
+// maxAncestry bounds the parent walk; real chains are shallow, the cap is
+// a defensive guard against corrupt PPid data.
+const maxAncestry = 16
+
+// ancestry walks the parent chain of self up to init, ordered root first
+// (nearest parent last). Unreadable ancestors terminate the walk with a
+// placeholder entry; cycles are detected and stopped.
+func ancestry(self *listen.Process, detail func(int) (*listen.Process, error)) []tui.ProcRef {
+	var chain []tui.ProcRef
+	seen := map[int]bool{self.PID: true}
+	for ppid, depth := self.PPID, 0; ppid > 0 && depth < maxAncestry; depth++ {
+		if seen[ppid] {
+			break
+		}
+		p, err := detail(ppid)
+		if err != nil {
+			chain = append(chain, tui.ProcRef{PID: ppid, Name: "unknown"})
+			break
+		}
+		seen[ppid] = true
+		chain = append(chain, tui.ProcRef{PID: ppid, Name: procLabel(p)})
+		ppid = p.PPID
+	}
+	slices.Reverse(chain)
+	return chain
+}
+
+// procLabel renders a short process name for the ancestry tree: the first
+// command line words ("go run"), falling back to the kernel comm name.
+func procLabel(p *listen.Process) string {
+	fields := strings.Fields(p.Name())
+	switch {
+	case len(fields) >= 2:
+		return filepath.Base(fields[0]) + " " + fields[1]
+	case len(fields) == 1:
+		return filepath.Base(fields[0])
+	default:
+		return p.Comm
+	}
+}
+
 // warnf writes a diagnostic to errW. Write failures are deliberately
 // discarded: there is nowhere left to report problems with stderr itself.
 func warnf(w io.Writer, format string, args ...any) {
@@ -419,6 +460,7 @@ func startTUI(port uint16) int {
 				Exe:     proc.Exe,
 				Memory:  proc.Memory(),
 				Build:   buildRows(cache.probe(proc)),
+				Parents: ancestry(proc, listen.Detail),
 				CanKill: selfUID == 0 || selfUID == proc.UID,
 			}
 			snap := func() *listen.Snapshot {

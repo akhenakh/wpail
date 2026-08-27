@@ -42,6 +42,7 @@ func FormatIP(ip net.IP) string {
 // Process describes an OS process, used for detail views and CLI reporting.
 type Process struct {
 	PID     int
+	PPID    int // parent PID; 0 when unavailable
 	UID     uint32
 	User    string
 	Comm    string

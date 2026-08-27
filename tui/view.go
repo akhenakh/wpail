@@ -201,6 +201,21 @@ func (m Model) detailText(d *Detail) string {
 	if d.Error != "" {
 		lines = append(lines, "", noteErrStyle.Render(d.Error))
 	}
+	if len(d.Parents) > 0 {
+		lines = append(lines, "", fieldLabel.Render("Ancestry"))
+		for i, p := range d.Parents {
+			indent := strings.Repeat("   ", i)
+			prefix := ""
+			if i > 0 {
+				prefix = "└─ "
+			}
+			label := truncate(fmt.Sprintf("%s (%d)", p.Name, p.PID), max(m.width-24, 16))
+			lines = append(lines, indent+prefix+label)
+		}
+		leaf := fmt.Sprintf("this process (%d)", d.PID)
+		lines = append(lines, strings.Repeat("   ", len(d.Parents))+
+			"└─ "+dimStyle.Render(truncate(leaf, max(m.width-24, 16))))
+	}
 	if len(d.Build) > 0 {
 		lines = append(lines, "", fieldLabel.Render("Build"))
 		for _, kv := range d.Build {

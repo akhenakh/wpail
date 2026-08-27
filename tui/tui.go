@@ -46,6 +46,12 @@ type BoundPort struct {
 	Port  uint16
 }
 
+// ProcRef names one process in the ancestry tree.
+type ProcRef struct {
+	PID  int
+	Name string
+}
+
 // Detail backs the Enter overlay: everything known about one process.
 type Detail struct {
 	PID     int
@@ -56,6 +62,7 @@ type Detail struct {
 	Memory  string
 	Ports   []BoundPort
 	Build   [][2]string // build metadata key/value pairs, render order
+	Parents []ProcRef   // ancestors, root (e.g. init) first; self excluded
 	CanKill bool
 	Error   string // non-empty when inspection failed
 }
