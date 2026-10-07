@@ -21,6 +21,14 @@ With [Homebrew](https://brew.sh) (macOS Apple Silicon and Linux):
 brew install akhenakh/tap/wpail
 ```
 
+### Arch Linux (AUR)
+
+`wpail` is available in the [AUR](https://aur.archlinux.org/packages/wpail):
+
+```sh
+paru -S wpail
+```
+
 ## Usage
 
 ```sh
