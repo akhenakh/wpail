@@ -66,6 +66,10 @@ class ${CLASS} < Formula
   def install
     bin.install "${BIN}"
   end
+
+  test do
+    assert_match "usage:", shell_output("#{bin}/${BIN} -h 2>&1")
+  end
 end
 EOF
 
