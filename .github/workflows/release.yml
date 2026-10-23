@@ -12,6 +12,8 @@ jobs:
   release:
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     # macOS runner: the darwin/arm64 build uses cgo (libproc); the Linux
     # builds stay static (CGO_ENABLED=0) and cross-compile from here.
     runs-on: macos-latest
@@ -34,6 +36,11 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.tar.gz
 
       - name: Publish Homebrew formula
         env:

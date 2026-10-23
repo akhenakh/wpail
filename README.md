@@ -29,6 +29,15 @@ brew install akhenakh/tap/wpail
 paru -S wpail
 ```
 
+### Verifying a release
+
+Release archives carry [build provenance](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)
+signed by this repository's release workflow. Check a downloaded archive with:
+
+```sh
+gh attestation verify wpail_Linux_x86_64.tar.gz --repo akhenakh/wpail
+```
+
 ## Usage
 
 ```sh
