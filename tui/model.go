@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ const (
 	modeList mode = iota
 	modeDetail
 	modeSignal
+	modeFilter
 )
 
 type (
@@ -76,9 +78,13 @@ func signalName(sig Signal) string {
 
 type Model struct {
 	cfg    Config
-	items  []Item
-	cursor int
-	loaded bool
+	all    []Item // latest scan, before filtering
+	items  []Item // rows currently shown: all, narrowed by filter
+	filter string
+
+	filterBefore string // filter restored when esc cancels editing
+	cursor       int
+	loaded       bool
 
 	mode      mode
 	detail    *Detail
@@ -220,21 +226,75 @@ func describeTarget(item Item, pid int) string {
 // applyItems swaps in a fresh scan while keeping the user's selection
 // anchored on the same (port, owner) row when it survives the refresh.
 func (m *Model) applyItems(items []Item) {
-	if len(m.items) == 0 {
-		m.items = items
+	prev, had := m.current()
+	idx := m.cursor
+	m.all = items
+	m.rebuildVisible()
+	if !had {
 		m.clampCursor()
 		return
 	}
-	it := m.items[min(m.cursor, len(m.items)-1)]
-	prev := [2]int{int(it.Port), it.Owner()}
-	m.items = items
-	for i, it := range items {
-		if [2]int{int(it.Port), it.Owner()} == prev {
+	key := [2]int{int(prev.Port), prev.Owner()}
+	for i, it := range m.items {
+		if [2]int{int(it.Port), it.Owner()} == key {
 			m.cursor = i
 			return
 		}
 	}
+	m.cursor = idx
 	m.clampCursor()
+}
+
+// rebuildVisible recomputes the shown rows from the last scan and the current
+// filter. It leaves the cursor alone; callers decide where selection goes.
+func (m *Model) rebuildVisible() {
+	m.items = m.items[:0]
+	for _, it := range m.all {
+		if itemMatches(it, m.filter) {
+			m.items = append(m.items, it)
+		}
+	}
+}
+
+// setFilter narrows the list to rows matching q, keeping the selection on the
+// same (port, owner) row when it still matches and jumping to the top
+// otherwise.
+func (m *Model) setFilter(q string) {
+	prev, had := m.current()
+	m.filter = q
+	m.rebuildVisible()
+	if !had {
+		m.cursor = 0
+		return
+	}
+	key := [2]int{int(prev.Port), prev.Owner()}
+	for i, it := range m.items {
+		if [2]int{int(it.Port), it.Owner()} == key {
+			m.cursor = i
+			return
+		}
+	}
+	m.cursor = 0
+	m.clampCursor()
+}
+
+// itemMatches reports whether any of the row's visible fields contains q,
+// case-insensitively. An empty query matches everything.
+func itemMatches(i Item, q string) bool {
+	if q == "" {
+		return true
+	}
+	q = strings.ToLower(q)
+	fields := []string{i.Proto, i.Addr, i.Name, i.User, strconv.Itoa(int(i.Port))}
+	for _, pid := range i.PIDs {
+		fields = append(fields, strconv.Itoa(pid))
+	}
+	for _, f := range fields {
+		if strings.Contains(strings.ToLower(f), q) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) clampCursor() {
@@ -261,6 +321,8 @@ func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.listKey(key)
 	case modeDetail:
 		return m.detailKey(key)
+	case modeFilter:
+		return m.filterKey(key)
 	default:
 		return m.modalKey(key)
 	}
@@ -286,8 +348,38 @@ func (m Model) listKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openSignal()
 	case "r":
 		return m, m.rescanCmd()
+	case "/":
+		m.filterBefore = m.filter
+		m.mode = modeFilter
+		m.note = ""
 	case "esc":
 		m.note = ""
+		if m.filter != "" {
+			m.setFilter("")
+		}
+	}
+	return m, nil
+}
+
+// filterKey edits the live filter: printable input narrows the list as you
+// type, enter keeps the query, esc restores the one in place before editing.
+func (m Model) filterKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch key.String() {
+	case "esc":
+		m.setFilter(m.filterBefore)
+		m.mode = modeList
+	case "enter":
+		m.mode = modeList
+	case "backspace":
+		if r := []rune(m.filter); len(r) > 0 {
+			m.setFilter(string(r[:len(r)-1]))
+		}
+	case "ctrl+u":
+		m.setFilter("")
+	default:
+		if key.Text != "" {
+			m.setFilter(m.filter + key.Text)
+		}
 	}
 	return m, nil
 }

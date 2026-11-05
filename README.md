@@ -89,6 +89,7 @@ Everything is agentless, read straight from the binaries:
 |---|---|
 | `↓/↑`, `j`, `g/G` | move selection |
 | `enter` or `i` | process detail: command line, exe path, owner, RSS memory, all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
+| `/` | filter the list as you type (port, protocol, address, PID, process or user); `enter` keeps it, `esc` cancels, `ctrl+u` clears |
 | `k` | send a signal — a dialog opens to pick SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT or SIGSTOP |
 | `r` | refresh now (the list also auto-refreshes every 2 s) |
 | `q` / `ctrl+c` | quit |

@@ -73,6 +73,13 @@ func (h *harness) feed(msg tea.Msg) tea.Cmd {
 
 func (h *harness) press(key tea.KeyPressMsg) tea.Cmd { return h.feed(key) }
 
+// typeString feeds one printable key press per rune, as a terminal would.
+func (h *harness) typeString(s string) {
+	for _, r := range s {
+		h.press(keyChar(r))
+	}
+}
+
 func keyChar(c rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: c, Text: string(c)} }
 
 func named(name string) tea.KeyPressMsg {
@@ -378,6 +385,147 @@ func TestMouseWheelScrollsList(t *testing.T) {
 	h.feed(tea.MouseWheelMsg{Button: tea.MouseWheelUp}) // clamps at the first row
 	if h.m.cursor != 0 {
 		t.Fatalf("wheel up must clamp: cursor=%d", h.m.cursor)
+	}
+}
+
+func TestSlashFiltersListLive(t *testing.T) {
+	h := newHarness(t)
+
+	h.press(keyChar('/'))
+	if h.m.mode != modeFilter {
+		t.Fatalf("/ must enter filter mode, got %v", h.m.mode)
+	}
+
+	h.press(keyChar('n'))
+	if h.m.filter != "n" || len(h.m.items) != 1 || h.m.items[0].Name != "nginx" {
+		t.Fatalf("live filter failed: q=%q items=%+v", h.m.filter, h.m.items)
+	}
+
+	h.press(keyChar('g'))
+	if h.m.filter != "ng" || len(h.m.items) != 1 {
+		t.Fatalf("narrowing failed: q=%q items=%+v", h.m.filter, h.m.items)
+	}
+
+	h.press(keyChar('x'))
+	if len(h.m.items) != 0 {
+		t.Fatalf("query with no match must empty the list, got %+v", h.m.items)
+	}
+
+	h.press(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if h.m.filter != "ng" || len(h.m.items) != 1 {
+		t.Fatalf("backspace failed: q=%q items=%+v", h.m.filter, h.m.items)
+	}
+
+	h.press(keyChar('q')) // q is text while filtering, not quit
+	if h.m.filter != "ngq" || h.m.mode != modeFilter {
+		t.Fatalf("q must be typed into the filter, mode=%v q=%q", h.m.mode, h.m.filter)
+	}
+
+	h.press(named("enter"))
+	if h.m.mode != modeList || h.m.filter != "ngq" {
+		t.Fatalf("enter must keep the query and return to the list, mode=%v q=%q",
+			h.m.mode, h.m.filter)
+	}
+}
+
+func TestFilterEscRestoresPreviousQuery(t *testing.T) {
+	h := newHarness(t)
+
+	h.press(keyChar('/'))
+	h.typeString("post")
+	h.press(named("enter"))
+	if h.m.filter != "post" || len(h.m.items) != 1 || h.m.items[0].Name != "postgres" {
+		t.Fatalf("precondition: q=%q items=%+v", h.m.filter, h.m.items)
+	}
+
+	h.press(keyChar('/'))
+	h.typeString("x") // no match
+	if len(h.m.items) != 0 {
+		t.Fatalf("precondition: expected empty list, got %+v", h.m.items)
+	}
+	h.press(named("esc"))
+	if h.m.mode != modeList || h.m.filter != "post" || len(h.m.items) != 1 {
+		t.Fatalf("esc must restore the previous query: mode=%v q=%q items=%+v",
+			h.m.mode, h.m.filter, h.m.items)
+	}
+}
+
+func TestEscClearsAppliedFilter(t *testing.T) {
+	h := newHarness(t)
+	h.press(keyChar('/'))
+	h.typeString("post")
+	h.press(named("enter"))
+
+	h.press(named("esc"))
+	if h.m.filter != "" || len(h.m.items) != 2 {
+		t.Fatalf("esc in list must clear the filter: q=%q items=%+v",
+			h.m.filter, h.m.items)
+	}
+}
+
+func TestFilterSurvivesRefresh(t *testing.T) {
+	h := newHarness(t)
+	h.press(keyChar('/'))
+	h.typeString("post")
+	h.press(named("enter"))
+
+	h.feed(scanMsg{items: fixtureItems()})
+	if h.m.filter != "post" || len(h.m.items) != 1 || h.m.items[0].Name != "postgres" {
+		t.Fatalf("refresh dropped the filter: q=%q items=%+v", h.m.filter, h.m.items)
+	}
+}
+
+func TestFilteredRowOpensDetail(t *testing.T) {
+	h := newHarness(t)
+	h.press(keyChar('/'))
+	h.typeString("post")
+	h.press(named("enter"))
+
+	cmd := h.press(named("enter"))
+	if h.m.mode != modeDetail {
+		t.Fatalf("enter on filtered row must open detail, mode=%v", h.m.mode)
+	}
+	dmsg, ok := cmd().(detailMsg)
+	if !ok || dmsg.pid != 200 {
+		t.Fatalf("filtered selection must request pid 200, got %T %+v", cmd(), cmd())
+	}
+}
+
+func TestItemMatches(t *testing.T) {
+	postgres := fixtureItems()[1]
+	for _, q := range []string{"postgres", "POST", "5432", "200", "pg", "tcp", "127"} {
+		if !itemMatches(postgres, q) {
+			t.Errorf("itemMatches(postgres, %q) = false, want true", q)
+		}
+	}
+	for _, q := range []string{"nginx", "80", "100", "udp"} {
+		if itemMatches(postgres, q) {
+			t.Errorf("itemMatches(postgres, %q) = true, want false", q)
+		}
+	}
+	if !itemMatches(postgres, "") {
+		t.Error("empty query must match every row")
+	}
+}
+
+func TestViewShowsFilterPromptAndEmptyState(t *testing.T) {
+	h := newHarness(t)
+	h.feed(tea.WindowSizeMsg{Width: 120, Height: 30})
+	h.press(keyChar('/'))
+	h.typeString("post")
+
+	content := plain(h.m.View().Content)
+	if !strings.Contains(content, "filter: post") {
+		t.Errorf("filter prompt missing from footer:\n%s", content)
+	}
+	if !strings.Contains(content, "postgres") || strings.Contains(content, "nginx") {
+		t.Errorf("table must show only matching rows:\n%s", content)
+	}
+
+	h.press(keyChar('x')) // nothing matches
+	content = plain(h.m.View().Content)
+	if !strings.Contains(content, `no listeners match "postx"`) {
+		t.Errorf("empty filtered state missing:\n%s", content)
 	}
 }
 

@@ -72,11 +72,18 @@ func (m Model) renderList() string {
 	if m.cfg.Port != 0 {
 		subtitle += fmt.Sprintf(" (filtered :%d)", m.cfg.Port)
 	}
+	if m.filter != "" {
+		subtitle += fmt.Sprintf(" (filter: %s)", m.filter)
+	}
 	lines := []string{title + dimStyle.Render(subtitle), ""}
 
 	switch {
 	case !m.loaded:
 		lines = append(lines, dimStyle.Render("scanning listening sockets…"))
+	case len(m.items) == 0 && m.filter != "":
+		lines = append(lines,
+			dimStyle.Render(fmt.Sprintf("no listeners match %q", m.filter)),
+			dimStyle.Render("esc clears the filter"))
 	case len(m.items) == 0:
 		lines = append(lines,
 			dimStyle.Render("no listening sockets found"),
@@ -180,6 +187,11 @@ func (m Model) rowAt(y int) (int, bool) {
 }
 
 func (m Model) renderFooter() string {
+	if m.mode == modeFilter {
+		query := truncate(m.filter, max(m.width-38, 8))
+		return labelStyle.Render("filter: "+query) + dimStyle.Render("▏") +
+			"   " + helpStyle.Render("enter apply · esc cancel · ctrl+u clear")
+	}
 	var hints string
 	switch m.mode {
 	case modeDetail:
@@ -187,7 +199,7 @@ func (m Model) renderFooter() string {
 	case modeSignal:
 		hints = "↑/↓ select signal · enter send · esc cancel"
 	default:
-		hints = "↓/↑ move · enter details · k kill · r refresh · q quit"
+		hints = "↓/↑ move · enter details · / filter · k kill · r refresh · q quit"
 	}
 	line := helpStyle.Render(hints)
 	if m.note != "" && m.mode != modeSignal {
