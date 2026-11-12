@@ -1,7 +1,7 @@
-//go:build !linux
+//go:build !linux && !freebsd
 
 package main
 
 // connectionsSupported reports whether the platform backend tracks sessions.
-// Only the procfs backend implements session pairing for now.
+// The macOS libproc backend does not pair sessions yet.
 const connectionsSupported = false

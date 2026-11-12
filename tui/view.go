@@ -13,10 +13,6 @@ import (
 
 const colGap = 2
 
-// maxDetailConns caps the session list in the detail overlay so a busy server
-// cannot push the rest of the panel off screen.
-const maxDetailConns = 8
-
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
@@ -209,6 +205,9 @@ func (m Model) renderFooter() string {
 	switch m.mode {
 	case modeDetail:
 		hints = "esc back · k send signal · q quit"
+		if m.detailMaxScroll() > 0 {
+			hints = "↑/↓ scroll · " + hints
+		}
 	case modeSignal:
 		hints = "↑/↓ select signal · enter send · esc cancel"
 	default:
@@ -226,16 +225,44 @@ func (m Model) renderFooter() string {
 	return line
 }
 
-func (m Model) renderDetail() string {
-	body := dimStyle.Render("loading process detail…")
-	if m.detail != nil {
-		body = m.detailText(m.detail)
-	} else if m.detailErr != nil {
-		body = noteErrStyle.Render("detail failed: " + m.detailErr.Error())
+// detailBody renders the process panel contents. Rendering and scrolling use
+// it so both agree on the line count.
+func (m Model) detailBody() string {
+	switch {
+	case m.detail != nil:
+		return m.detailText(m.detail)
+	case m.detailErr != nil:
+		return noteErrStyle.Render("detail failed: " + m.detailErr.Error())
+	default:
+		return dimStyle.Render("loading process detail…")
 	}
+}
+
+func (m Model) detailLines() []string { return strings.Split(m.detailBody(), "\n") }
+
+// detailVisibleLines is how many body lines fit between the title, the box
+// chrome (border + padding) and the footer. renderDetail keeps the layout at
+// exactly m.height rows.
+func (m Model) detailVisibleLines() int { return max(m.height-7, 1) }
+
+// detailMaxScroll is the largest offset that still fills the window.
+func (m Model) detailMaxScroll() int {
+	return max(len(m.detailLines())-m.detailVisibleLines(), 0)
+}
+
+func (m Model) renderDetail() string {
+	lines := m.detailLines()
+	visible := m.detailVisibleLines()
+	maxScroll := max(len(lines)-visible, 0)
+	start := min(max(m.detailScroll, 0), maxScroll)
+	end := min(start+visible, len(lines))
+	window := strings.Join(lines[start:end], "\n")
 
 	title := titleStyle.Render("wpail — process detail")
-	box := boxStyle.Render(body)
+	if maxScroll > 0 {
+		title += dimStyle.Render(fmt.Sprintf("  lines %d–%d/%d", start+1, end, len(lines)))
+	}
+	box := boxStyle.Render(window)
 	screen := lipgloss.Place(m.width, max(m.height-3, 1),
 		lipgloss.Center, lipgloss.Center, box)
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -277,12 +304,7 @@ func (m Model) detailText(d *Detail) string {
 	}
 	if len(d.Conns) > 0 {
 		lines = append(lines, "", fieldLabel.Render("Connections"))
-		for i, c := range d.Conns {
-			if i == maxDetailConns {
-				lines = append(lines, "  "+dimStyle.Render(
-					fmt.Sprintf("… %d more", len(d.Conns)-maxDetailConns)))
-				break
-			}
+		for _, c := range d.Conns {
 			line := fmt.Sprintf("%-6s %-13s %s → %s", c.Proto, c.State, c.Local, c.Remote)
 			if c.Peer != "" {
 				line += "  " + c.Peer

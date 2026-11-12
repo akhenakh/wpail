@@ -215,6 +215,42 @@ func (s *Snapshot) ConnectionCount(port uint16) int {
 	return n
 }
 
+// SessionsFor returns the sessions shown for pid in the detail view: every
+// session attached to a port it listens on (the accepting worker may be a
+// different PID), plus any session pid holds as a client. The result is
+// de-duplicated and sorted like Connections.
+func (s *Snapshot) SessionsFor(pid int) []Connection {
+	ports := make(map[uint16]bool)
+	for _, sk := range s.owners[pid] {
+		ports[sk.Port] = true
+	}
+
+	seen := make(map[connKey]bool)
+	out := make([]Connection, 0, len(ports))
+	add := func(c Connection) {
+		k := connKey{
+			local:  endpointOf(c.Local, c.LocalPort),
+			remote: endpointOf(c.Remote, c.RemotePort),
+			family: strings.TrimSuffix(c.Proto, "6"),
+		}
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, c)
+	}
+	for port := range ports {
+		for _, c := range s.Connections(port) {
+			add(c)
+		}
+	}
+	for _, c := range s.ConnectionsOf(pid) {
+		add(c)
+	}
+	sortConnections(out)
+	return out
+}
+
 // Owned returns every listening socket held open by pid.
 func (s *Snapshot) Owned(pid int) []Socket { return s.owners[pid] }
 

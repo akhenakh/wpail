@@ -89,6 +89,50 @@ func TestScanFindsOwnSockets(t *testing.T) {
 	}
 }
 
+func TestScanFindsOwnSessions(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot bind: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Skipf("cannot dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	server, err := ln.Accept()
+	if err != nil {
+		t.Skipf("cannot accept: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	self := os.Getpid()
+	snap, err := Scan()
+	if err != nil {
+		t.Fatalf("Scan failed: %v", err)
+	}
+
+	var found *Connection
+	for _, c := range snap.Connections(port) {
+		if c.State == "ESTABLISHED" && c.PID == self {
+			found = &c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no established session owned by pid %d on port %d: %+v",
+			self, port, snap.Connections(port))
+	}
+	if found.PeerPID != self {
+		t.Errorf("peer PID = %d, want %d (client runs in this process)", found.PeerPID, self)
+	}
+	if found.RemotePort == 0 {
+		t.Error("session has no remote endpoint")
+	}
+}
+
 func findRow(rows []Row, port uint16) (Row, bool) {
 	for _, r := range rows {
 		if r.Port == port {

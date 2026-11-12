@@ -615,7 +615,7 @@ var startTUI = func(port uint16) int {
 						Port:  sk.Port,
 					})
 				}
-				d.Conns = connRefs(snap.ConnectionsOf(pid), cache)
+				d.Conns = connRefs(snap.SessionsFor(pid), cache)
 			}
 			sortPorts(d.Ports)
 			return d, nil

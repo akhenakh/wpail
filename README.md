@@ -103,7 +103,8 @@ Everything is agentless, read straight from the binaries:
 | Key | Action |
 |---|---|
 | `↓/↑`, `j`, `g/G` | move selection |
-| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, active sessions, all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
+| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, active sessions (including ones accepted by worker processes), all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
+| `↑/↓`, `pgup`/`pgdn`, `home`/`end`, wheel | scroll a detail panel taller than the screen (the title shows the visible line range) |
 | `/` | filter the list as you type (port, protocol, address, PID, process or user); `enter` keeps it, `esc` cancels, `ctrl+u` clears |
 | `k` | send a signal — a dialog opens to pick SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT or SIGSTOP |
 | `r` | refresh now (the list also auto-refreshes every 2 s) |
@@ -143,9 +144,10 @@ On macOS and FreeBSD keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks
   3. Pair the two halves of a local connection by matching mirrored 4-tuples (IPv4-mapped IPv6 addresses are normalized so dual-stack listeners still match), which attributes the client program as the session's peer.
   4. Enrich PIDs from `/proc/<pid>`: uid → username via NSS, cmdline/comm, exe link, VmRSS memory.
 - **FreeBSD:**
-  1. Query `net.inet.tcp.pcblist` and `net.inet.udp.pcblist` via `sysctl` for listening TCP sockets and bound UDP sockets.
+  1. Query `net.inet.tcp.pcblist` and `net.inet.udp.pcblist` via `sysctl` for every TCP PCB (state, local and foreign endpoint) and every bound UDP socket.
   2. Query `kern.file` (`struct xfile`) to map each socket's kernel pointer (`xf_data` / `xso_so`) to owning PIDs.
-  3. Enrich PIDs via `kern.proc.{pid,pathname,args,cwd}` sysctls for UID/username, command line, executable path, working directory and RSS memory.
+  3. Pair local session halves through their mirrored 4-tuples, exactly like the Linux backend, to name the client program.
+  4. Enrich PIDs via `kern.proc.{pid,pathname,args,cwd}` sysctls for UID/username, command line, executable path, working directory and RSS memory.
 - **macOS (arm64):**
   1. Enumerate all processes with `proc_listallpids`, list each one's file descriptors with `proc_pidinfo(PROC_PIDLISTFDS)`.
   2. Resolve socket descriptors via `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`; keep TCP sockets in listen state and bound UDP sockets.
@@ -164,8 +166,8 @@ tui/              Bubble Tea v2 model/view/update, lipgloss styling
 ## Limitations
 
 - macOS support is arm64-only by design (`darwin && arm64` build tags).
-- Session tracking (`-c`, the `CONNS` column and the detail block) is
-  Linux-only for now; the macOS and FreeBSD backends list listeners only.
+- Session tracking (`-c`, the `CONNS` column and the detail block) works on
+  Linux and FreeBSD; the macOS libproc backend still lists listeners only.
 - Session tracking is snapshot-based: connections shorter than the scan
   interval can be missed, and `TIME_WAIT` rows carry no inode, so their local
   owner can no longer be identified. Unconnected UDP (`sendto`/`recvfrom`)

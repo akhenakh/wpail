@@ -86,10 +86,11 @@ type Model struct {
 	cursor       int
 	loaded       bool
 
-	mode      mode
-	detail    *Detail
-	detailPID int
-	detailErr error
+	mode         mode
+	detail       *Detail
+	detailPID    int
+	detailErr    error
+	detailScroll int
 
 	sigTarget signalTarget
 	sigSel    int
@@ -197,21 +198,31 @@ func (m Model) mouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	return m.openDetail()
 }
 
-// mouseWheel scrolls the list: wheel up walks toward earlier rows, wheel
-// down toward later ones.
+// mouseWheel scrolls the surface under the pointer: the list walks toward
+// earlier/later rows, the detail overlay toward earlier/later lines.
 func (m Model) mouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
-	if m.mode != modeList {
-		return m, nil
+	switch m.mode {
+	case modeList:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.cursor--
+		case tea.MouseWheelDown:
+			m.cursor++
+		default:
+			return m, nil
+		}
+		m.clampCursor()
+	case modeDetail:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			m.detailScroll--
+		case tea.MouseWheelDown:
+			m.detailScroll++
+		default:
+			return m, nil
+		}
+		m.clampDetailScroll()
 	}
-	switch msg.Button {
-	case tea.MouseWheelUp:
-		m.cursor--
-	case tea.MouseWheelDown:
-		m.cursor++
-	default:
-		return m, nil
-	}
-	m.clampCursor()
 	return m, nil
 }
 
@@ -295,6 +306,11 @@ func itemMatches(i Item, q string) bool {
 		}
 	}
 	return false
+}
+
+// clampDetailScroll keeps the overlay offset within the rendered content.
+func (m *Model) clampDetailScroll() {
+	m.detailScroll = min(max(m.detailScroll, 0), m.detailMaxScroll())
 }
 
 func (m *Model) clampCursor() {
@@ -398,6 +414,7 @@ func (m Model) openDetail() (tea.Model, tea.Cmd) {
 	m.detailPID = pid
 	m.detail = nil
 	m.detailErr = nil
+	m.detailScroll = 0
 	m.note = ""
 	return m, m.detailCmd(pid)
 }
@@ -426,6 +443,7 @@ func (m Model) detailKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc", "enter":
 		m.mode = modeList
 		m.detail = nil
+		m.detailScroll = 0
 	case "k":
 		if m.detail == nil || m.detail.Error != "" {
 			return m, nil
@@ -437,7 +455,20 @@ func (m Model) detailKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sigSel = 0
 		m.mode = modeSignal
 		m.note = ""
+	case "down", "j":
+		m.detailScroll++
+	case "up", "p":
+		m.detailScroll--
+	case "pgdown", "ctrl+f", "ctrl+d":
+		m.detailScroll += m.detailVisibleLines()
+	case "pgup", "ctrl+b", "ctrl+u":
+		m.detailScroll -= m.detailVisibleLines()
+	case "home", "g":
+		m.detailScroll = 0
+	case "end", "G":
+		m.detailScroll = m.detailMaxScroll()
 	}
+	m.clampDetailScroll()
 	return m, nil
 }
 
