@@ -1,10 +1,11 @@
-//go:build linux || (darwin && arm64)
+//go:build linux || freebsd || (darwin && arm64)
 
 // Package listen discovers which processes are listening on TCP/UDP ports by
 // reading kernel tables directly, without shelling out to lsof or ss.
 //
 // Linux reads procfs (/proc/net/{tcp,tcp6,udp,udp6} plus per-process fd
-// symlinks); macOS walks process file descriptors through libproc.
+// symlinks); FreeBSD reads the kernel PCB and file tables through sysctl;
+// macOS walks process file descriptors through libproc.
 package listen
 
 import (

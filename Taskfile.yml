@@ -3,12 +3,12 @@ version: "3"
 vars:
   BIN: bin/wpail
   LDFLAGS: -s -w
-  # macOS uses a cgo backend (libproc); Linux builds stay static.
+  # macOS (libproc) and FreeBSD (sysctl) use cgo backends; Linux builds stay static.
   GOOS:
     sh: go env GOOS
   CGO_ENABLED:
     sh: |
-      case "$(go env GOOS)" in darwin) echo 1 ;; *) echo 0 ;; esac
+      case "$(go env GOOS)" in darwin|freebsd) echo 1 ;; *) echo 0 ;; esac
 
 tasks:
   build:

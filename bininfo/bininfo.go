@@ -1,4 +1,4 @@
-//go:build linux || (darwin && arm64)
+//go:build linux || freebsd || (darwin && arm64)
 
 // Package bininfo extracts build metadata from a process' binary and its
 // surrounding context, so ephemeral developer builds ("go run .", "cargo

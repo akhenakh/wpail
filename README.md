@@ -11,6 +11,7 @@ It is built for developers: instead of a bare PID or a cryptic temp path, wpail 
 It reads the kernel tables directly (no shelling out to other tools), so it stays self-contained. Supported platforms:
 
 - **Linux** — reads procfs (`/proc/net/*`, `/proc/<pid>/fd`), builds without cgo.
+- **FreeBSD** — reads kernel PCB tables and open files via `sysctl`; requires a C toolchain (`cc`, included in the FreeBSD base system).
 - **macOS (Apple Silicon, arm64)** — walks process file descriptors through `libproc`; requires a C toolchain (the Xcode Command Line Tools, already present on any dev machine).
 
 ## Install
@@ -96,14 +97,14 @@ Everything is agentless, read straight from the binaries:
 
 Killing is permission-checked up front: if you are not the owner of the target process (and not root), wpail explains that instead of dying on `EPERM`. Sockets vanish from the table right after a successful signal.
 
-Without root, wpail can only resolve owners of sockets owned by your user — unidentified rows appear as pid `—`; rerun with `sudo` for the full system view.
+Without root, visibility depends on the OS and its security policy (for example, macOS hides other users' descriptors) — unidentified rows appear as pid `—`; rerun with `sudo` for the full system view.
 
 ## Building
 
-Requires Go 1.27+ (and on macOS, the Xcode Command Line Tools for cgo).
+Requires Go 1.27+ (and on macOS or FreeBSD, a C toolchain for cgo).
 
 ```sh
-task build       # binary in bin/wpail (static on Linux, links libSystem on macOS)
+task build       # binary in bin/wpail (static on Linux, links libSystem on macOS, libc on FreeBSD)
 task check       # vet + go fix + tests + build
 task test        # unit tests only
 task listener    # launch the dev listener fixture app (`go run .`, port 18081),
@@ -118,7 +119,7 @@ CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o bin/wpail .
 go install github.com/akhenakh/wpail@latest   # once published
 ```
 
-On macOS keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks the libproc backend there.
+On macOS and FreeBSD keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks the libproc and sysctl backends there.
 
 ## How it works
 
@@ -126,6 +127,10 @@ On macOS keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks the libproc
   1. Parse `/proc/net/{tcp,tcp6,udp,udp6}` for listening sockets (kernel prints addresses as little-endian hex words).
   2. Walk `/proc/<pid>/fd/*` symlinks of the form `socket:[inode]` to map each socket inode to owning PIDs.
   3. Enrich PIDs from `/proc/<pid>`: uid → username via NSS, cmdline/comm, exe link, VmRSS memory.
+- **FreeBSD:**
+  1. Query `net.inet.tcp.pcblist` and `net.inet.udp.pcblist` via `sysctl` for listening TCP sockets and bound UDP sockets.
+  2. Query `kern.file` (`struct xfile`) to map each socket's kernel pointer (`xf_data` / `xso_so`) to owning PIDs.
+  3. Enrich PIDs via `kern.proc.{pid,pathname,args,cwd}` sysctls for UID/username, command line, executable path, working directory and RSS memory.
 - **macOS (arm64):**
   1. Enumerate all processes with `proc_listallpids`, list each one's file descriptors with `proc_pidinfo(PROC_PIDLISTFDS)`.
   2. Resolve socket descriptors via `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)`; keep TCP sockets in listen state and bound UDP sockets.
@@ -135,7 +140,7 @@ On macOS keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks the libproc
 
 ```
 main.go           CLI parsing, output rendering, signal delivery
-listen/           platform-neutral snapshot API + per-OS scanners (procfs / libproc)
+listen/           platform-neutral snapshot API + per-OS scanners (procfs / sysctl / libproc)
 bininfo/          agentless build metadata from process binaries (go/rust/zig)
 dev/listener/     standalone fixture app (`task listener`) for trying wpail out
 tui/              Bubble Tea v2 model/view/update, lipgloss styling
