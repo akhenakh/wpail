@@ -14,7 +14,7 @@ import (
 
 func fixtureItems() []Item {
 	return []Item{
-		{Port: 80, Proto: "tcp+tcp6", Addr: "0.0.0.0,[::]", PIDs: []int{100}, Name: "nginx", User: "root"},
+		{Port: 80, Proto: "tcp+tcp6", Addr: "0.0.0.0,[::]", Conns: 2, PIDs: []int{100}, Name: "nginx", User: "root"},
 		{Port: 5432, Proto: "tcp", Addr: "127.0.0.1", PIDs: []int{200}, Name: "postgres", User: "pg"},
 	}
 }
@@ -280,7 +280,7 @@ func TestViewRendersTableAndFilteredTitle(t *testing.T) {
 	h.feed(tea.WindowSizeMsg{Width: 120, Height: 30})
 
 	content := plain(h.m.View().Content)
-	for _, want := range []string{"wpail", "PORT", "PROCESS", "nginx"} {
+	for _, want := range []string{"wpail", "PORT", "CONNS", "PROCESS", "nginx"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("list view missing %q in:\n%s", want, content)
 		}

@@ -9,12 +9,14 @@
 package listen
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
 	"maps"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +27,33 @@ type Socket struct {
 	Port  uint16
 	Key   uint64 // opaque socket identity, unique within one Snapshot
 	UID   uint32
+}
+
+// Connection is one session observed in the kernel socket tables: the local
+// endpoint, the remote peer, the transport state, and — best effort — the
+// processes holding each end. Key and PID describe the local socket; PeerKey
+// and PeerPID describe the mirrored socket when the peer runs on this host.
+type Connection struct {
+	Proto      string // tcp, tcp6, udp, udp6
+	State      string // ESTABLISHED, CLOSE_WAIT, TIME_WAIT, …
+	Local      net.IP
+	LocalPort  uint16
+	Remote     net.IP
+	RemotePort uint16
+	Key        uint64
+	PeerKey    uint64
+	PID        int
+	PeerPID    int
+}
+
+// LocalAddr renders the local endpoint as host:port.
+func (c Connection) LocalAddr() string {
+	return net.JoinHostPort(c.Local.String(), strconv.Itoa(int(c.LocalPort)))
+}
+
+// RemoteAddr renders the remote endpoint as host:port.
+func (c Connection) RemoteAddr() string {
+	return net.JoinHostPort(c.Remote.String(), strconv.Itoa(int(c.RemotePort)))
 }
 
 // String renders the socket as proto://ip:port, bracketing IPv6 addresses.
@@ -88,16 +117,35 @@ func sortSockets(s []Socket) {
 	})
 }
 
+func sortConnections(c []Connection) {
+	slices.SortFunc(c, func(a, b Connection) int {
+		if n := cmp.Compare(a.LocalPort, b.LocalPort); n != 0 {
+			return n
+		}
+		if n := strings.Compare(a.Proto, b.Proto); n != 0 {
+			return n
+		}
+		if n := bytes.Compare(a.Remote.To16(), b.Remote.To16()); n != 0 {
+			return n
+		}
+		if n := cmp.Compare(a.RemotePort, b.RemotePort); n != 0 {
+			return n
+		}
+		return strings.Compare(a.State, b.State)
+	})
+}
+
 // Row aggregates every listening socket sharing one port. Multiple processes
 // can share a port via SO_REUSEPORT, so owners are reported as parallel
 // slices: PIDs[i] runs as Users[i] answering to Names[i].
 type Row struct {
-	Port   uint16
-	Protos []string // unique, canonical order tcp, tcp6, udp, udp6
-	Addrs  []string // unique formatted local addresses, sorted
-	PIDs   []int    // sorted ascending; empty when the owner is unresolvable
-	Names  []string // aligned with PIDs; "?" entries for unknown
-	Users  []string // aligned with PIDs
+	Port        uint16
+	Protos      []string // unique, canonical order tcp, tcp6, udp, udp6
+	Addrs       []string // unique formatted local addresses, sorted
+	Connections int      // accepted sessions currently attached to this port
+	PIDs        []int    // sorted ascending; empty when the owner is unresolvable
+	Names       []string // aligned with PIDs; "?" entries for unknown
+	Users       []string // aligned with PIDs
 }
 
 // Owner returns the representative PID or 0 when unknown.
@@ -108,19 +156,63 @@ func (r Row) Owner() int {
 	return 0
 }
 
-// Snapshot is one point-in-time view of listening sockets and their owners.
+// Snapshot is one point-in-time view of listening sockets, their owners, and
+// the sessions currently attached to them.
 type Snapshot struct {
 	Sockets []Socket
+	conns   []Connection
 	owners  map[int][]Socket                // pid -> owned listening sockets
 	detail  func(pid int) (*Process, error) // platform process resolver
 }
 
-func newSnapshot(sockets []Socket, owners map[int][]Socket,
+func newSnapshot(sockets []Socket, conns []Connection, owners map[int][]Socket,
 	detail func(pid int) (*Process, error)) *Snapshot {
 	if detail == nil {
 		detail = func(int) (*Process, error) { return nil, errors.New("process detail unsupported") }
 	}
-	return &Snapshot{Sockets: sockets, owners: owners, detail: detail}
+	if owners == nil {
+		owners = map[int][]Socket{}
+	}
+	sortConnections(conns)
+	return &Snapshot{Sockets: sockets, conns: conns, owners: owners, detail: detail}
+}
+
+// Connections returns the sessions whose local port is port, sorted by local
+// port, protocol and remote endpoint. A zero port returns every session.
+func (s *Snapshot) Connections(port uint16) []Connection {
+	if port == 0 {
+		return slices.Clone(s.conns)
+	}
+	var out []Connection
+	for _, c := range s.conns {
+		if c.LocalPort == port {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ConnectionsOf returns the sessions held locally by pid, as either the
+// accepting server or the connecting client.
+func (s *Snapshot) ConnectionsOf(pid int) []Connection {
+	var out []Connection
+	for _, c := range s.conns {
+		if c.PID == pid {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ConnectionCount counts the sessions attached to a listening port.
+func (s *Snapshot) ConnectionCount(port uint16) int {
+	n := 0
+	for _, c := range s.conns {
+		if c.LocalPort == port {
+			n++
+		}
+	}
+	return n
 }
 
 // Owned returns every listening socket held open by pid.
@@ -191,12 +283,18 @@ func (s *Snapshot) Rows(filter uint16) []Row {
 		a.inodes[sk.Key] = true
 	}
 
+	counts := make(map[uint16]int, len(order))
+	for _, c := range s.conns {
+		counts[c.LocalPort]++
+	}
+
 	rows := make([]Row, 0, len(order))
 	for _, port := range order {
 		a := slots[port]
 
 		row := Row{Port: port,
-			Protos: make([]string, 0, len(a.protos))}
+			Connections: counts[port],
+			Protos:      make([]string, 0, len(a.protos))}
 		for proto := range a.protos {
 			row.Protos = append(row.Protos, proto)
 		}

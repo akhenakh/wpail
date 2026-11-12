@@ -199,6 +199,9 @@ func TestFlagCombinations(t *testing.T) {
 		{[]string{"-u", "-v", "80"}, 2},
 		{[]string{"-t", "-v", "80"}, 2},
 		{[]string{"-t", "-u", "80"}, 2},
+		{[]string{"-t", "-c", "80"}, 2},
+		{[]string{"-c", "-u", "80"}, 2},
+		{[]string{"-c", "-v", "80"}, 2},
 	}
 	for _, tt := range tests {
 		if code := run(tt.args); code != tt.code {

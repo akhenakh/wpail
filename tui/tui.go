@@ -18,6 +18,7 @@ type Item struct {
 	Port  uint16
 	Proto string // e.g. "tcp+tcp6"
 	Addr  string // e.g. "0.0.0.0,[::]"
+	Conns int    // accepted sessions currently attached to the port
 	PIDs  []int  // sorted ascending; shared ports may have several owners
 	Name  string
 	User  string
@@ -52,6 +53,16 @@ type ProcRef struct {
 	Name string
 }
 
+// ConnRef is one session held by a process: both endpoints, the transport
+// state, and the local process on the other end when it could be identified.
+type ConnRef struct {
+	Proto  string
+	State  string
+	Local  string
+	Remote string
+	Peer   string // "name [pid]", empty when the peer is remote or unknown
+}
+
 // Detail backs the Enter overlay: everything known about one process.
 type Detail struct {
 	PID     int
@@ -61,6 +72,7 @@ type Detail struct {
 	Exe     string
 	Memory  string
 	Ports   []BoundPort
+	Conns   []ConnRef   // active sessions held by this process
 	Build   [][2]string // build metadata key/value pairs, render order
 	Parents []ProcRef   // ancestors, root (e.g. init) first; self excluded
 	CanKill bool

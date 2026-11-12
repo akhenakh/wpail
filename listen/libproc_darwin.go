@@ -165,7 +165,7 @@ func scanLibproc() (*Snapshot, error) {
 	for pid := range owners {
 		sortSockets(owners[pid])
 	}
-	return newSnapshot(sockets, owners, Detail), nil
+	return newSnapshot(sockets, nil, owners, Detail), nil
 }
 
 // allPIDs lists every process on the system via proc_listallpids.

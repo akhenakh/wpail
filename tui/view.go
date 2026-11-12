@@ -13,6 +13,10 @@ import (
 
 const colGap = 2
 
+// maxDetailConns caps the session list in the detail overlay so a busy server
+// cannot push the rest of the panel off screen.
+const maxDetailConns = 8
+
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
@@ -33,11 +37,11 @@ func (m Model) render() string {
 }
 
 // colSpec holds computed column widths for the listener table.
-type colSpec struct{ port, proto, addr, pid, user, proc int }
+type colSpec struct{ port, proto, addr, conns, pid, user, proc int }
 
 func calcCols(width int) colSpec {
-	c := colSpec{port: 8, proto: 12, addr: 20, pid: 9, user: 12, proc: 24}
-	fixedSum := c.port + c.proto + c.pid + c.user + 5*colGap
+	c := colSpec{port: 8, proto: 12, addr: 20, conns: 6, pid: 9, user: 12, proc: 24}
+	fixedSum := c.port + c.proto + c.conns + c.pid + c.user + 6*colGap
 	extra := width - fixedSum - c.addr - c.proc - 2
 	switch {
 	case extra > 40:
@@ -55,20 +59,21 @@ func calcCols(width int) colSpec {
 			c.addr += takeAddr
 			c.proto = 6
 			c.user = 8
+			c.conns = 5
 		}
 	}
 	return c
 }
 
 func (c colSpec) widths() []int {
-	return []int{c.port, c.proto, c.addr, c.pid, c.user, c.proc}
+	return []int{c.port, c.proto, c.addr, c.conns, c.pid, c.user, c.proc}
 }
 
-var listHeaders = []string{"PORT", "PROTO", "ADDRESS", "PID", "USER", "PROCESS"}
+var listHeaders = []string{"PORT", "PROTO", "ADDRESS", "CONNS", "PID", "USER", "PROCESS"}
 
 func (m Model) renderList() string {
 	title := titleStyle.Render("wpail")
-	subtitle := " — listening sockets"
+	subtitle := " — listeners & sessions"
 	if m.cfg.Port != 0 {
 		subtitle += fmt.Sprintf(" (filtered :%d)", m.cfg.Port)
 	}
@@ -113,9 +118,10 @@ func (m Model) renderTable() []string {
 			cell(fmt.Sprintf("%d", item.Port), widths[0]),
 			cell(item.Proto, widths[1]),
 			cell(item.Addr, widths[2]),
-			cell(pidsDisplay(item), widths[3]),
-			cell(ownerUser(item), widths[4]),
-			cell(item.Name, widths[5]),
+			cell(connsDisplay(item), widths[3]),
+			cell(pidsDisplay(item), widths[4]),
+			cell(ownerUser(item), widths[5]),
+			cell(item.Name, widths[6]),
 		}, strings.Repeat(" ", colGap))
 		if i == m.cursor {
 			rows = append(rows, selStyle.Render(row))
@@ -130,6 +136,13 @@ func (m Model) renderTable() []string {
 		rows = append(rows, dimStyle.Render(fmt.Sprintf("… %d more", len(m.items)-end)))
 	}
 	return rows
+}
+
+func connsDisplay(i Item) string {
+	if i.Conns == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d", i.Conns)
 }
 
 func pidsDisplay(i Item) string {
@@ -260,6 +273,21 @@ func (m Model) detailText(d *Detail) string {
 		for _, kv := range d.Build {
 			lines = append(lines, "  "+dimStyle.Render(pad(kv[0], 9))+
 				truncate(kv[1], max(m.width-16, 20)))
+		}
+	}
+	if len(d.Conns) > 0 {
+		lines = append(lines, "", fieldLabel.Render("Connections"))
+		for i, c := range d.Conns {
+			if i == maxDetailConns {
+				lines = append(lines, "  "+dimStyle.Render(
+					fmt.Sprintf("… %d more", len(d.Conns)-maxDetailConns)))
+				break
+			}
+			line := fmt.Sprintf("%-6s %-13s %s → %s", c.Proto, c.State, c.Local, c.Remote)
+			if c.Peer != "" {
+				line += "  " + c.Peer
+			}
+			lines = append(lines, "  "+truncate(line, max(m.width-16, 20)))
 		}
 	}
 	if len(d.Ports) > 0 {

@@ -47,7 +47,21 @@ wpail -t 6666      # same TUI, filtered to one port
 wpail 6666         # PIDs listening on TCP/UDP port 6666, one per line
 wpail -u 6666      # PID + owning user
 wpail -v 6666      # verbose: PID, user, build metadata per listener
+wpail -c 6666      # active sessions attached to port 6666 (remote peer + local program)
 ```
+
+`wpail -c PORT` lists the live sessions accepted by a port and, for loopback
+clients, the program on the other end:
+
+```
+PROTO  STATE        LOCAL           REMOTE           PEER
+tcp    ESTABLISHED  127.0.0.1:8080  127.0.0.1:40000  github.com/you/web (go run) [418002]
+tcp    ESTABLISHED  127.0.0.1:8080  10.0.0.7:52344   —
+```
+
+The peer column is resolved by matching the kernel's mirrored socket (the
+client's connected socket) against the fd table, so it identifies programs on
+this host; remote peers only contribute their IP and port.
 
 Exit codes: `0` found, `1` nothing found / scan error, `2` usage error.
 
@@ -84,12 +98,12 @@ Everything is agentless, read straight from the binaries:
 
 ## Interactive mode
 
-`wpail -t` shows a live table of listeners: port, protocols, local address(es), PID(s), process and user.
+`wpail -t` shows a live table of listeners: port, protocols, local address(es), session count, PID(s), process and user.
 
 | Key | Action |
 |---|---|
 | `↓/↑`, `j`, `g/G` | move selection |
-| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
+| `enter` or `i` | process detail: command line, exe path, owner, RSS memory, active sessions, all bound ports, plus a **Build** block (module, toolchain, project dir, VCS) for developer builds |
 | `/` | filter the list as you type (port, protocol, address, PID, process or user); `enter` keeps it, `esc` cancels, `ctrl+u` clears |
 | `k` | send a signal — a dialog opens to pick SIGTERM, SIGKILL, SIGINT, SIGHUP, SIGQUIT or SIGSTOP |
 | `r` | refresh now (the list also auto-refreshes every 2 s) |
@@ -124,9 +138,10 @@ On macOS and FreeBSD keep cgo enabled (it is by default); `CGO_ENABLED=0` breaks
 ## How it works
 
 - **Linux:**
-  1. Parse `/proc/net/{tcp,tcp6,udp,udp6}` for listening sockets (kernel prints addresses as little-endian hex words).
+  1. Parse `/proc/net/{tcp,tcp6,udp,udp6}` for listening sockets and every connected session (kernel prints addresses as little-endian hex words).
   2. Walk `/proc/<pid>/fd/*` symlinks of the form `socket:[inode]` to map each socket inode to owning PIDs.
-  3. Enrich PIDs from `/proc/<pid>`: uid → username via NSS, cmdline/comm, exe link, VmRSS memory.
+  3. Pair the two halves of a local connection by matching mirrored 4-tuples (IPv4-mapped IPv6 addresses are normalized so dual-stack listeners still match), which attributes the client program as the session's peer.
+  4. Enrich PIDs from `/proc/<pid>`: uid → username via NSS, cmdline/comm, exe link, VmRSS memory.
 - **FreeBSD:**
   1. Query `net.inet.tcp.pcblist` and `net.inet.udp.pcblist` via `sysctl` for listening TCP sockets and bound UDP sockets.
   2. Query `kern.file` (`struct xfile`) to map each socket's kernel pointer (`xf_data` / `xso_so`) to owning PIDs.
@@ -149,5 +164,11 @@ tui/              Bubble Tea v2 model/view/update, lipgloss styling
 ## Limitations
 
 - macOS support is arm64-only by design (`darwin && arm64` build tags).
+- Session tracking (`-c`, the `CONNS` column and the detail block) is
+  Linux-only for now; the macOS and FreeBSD backends list listeners only.
+- Session tracking is snapshot-based: connections shorter than the scan
+  interval can be missed, and `TIME_WAIT` rows carry no inode, so their local
+  owner can no longer be identified. Unconnected UDP (`sendto`/`recvfrom`)
+  leaves no peer in `/proc/net/udp`; closing those gaps needs eBPF on Linux.
 - The list refreshes at a fixed cadence rather than reacting to socket events.
 - `-u` prints processes known to your current privileges; run as root (or with `sudo`) when auditing services.

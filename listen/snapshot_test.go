@@ -42,8 +42,10 @@ func writeFixtureProc(t *testing.T) string {
 	b.WriteString(hdr)
 	b.WriteString("   0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 100\n") // *:8080       -> pid 1234
 	b.WriteString("   1: 00000000:1B58 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 110\n") // *:7000 REUSEPORT -> pids 1234,2345
-	b.WriteString("   2: 00000000:2382 0100007F:0011 01 00000000:00000000 00:00000000 00000000  1000        0 111\n") // :9090 established, must be ignored
+	b.WriteString("   2: 00000000:2382 0100007F:0011 01 00000000:00000000 00:00000000 00000000  1000        0 111\n") // :9090 established session
 	b.WriteString("   3: 00000000:0BB8 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 999\n") // :3000 unmapped owner
+	b.WriteString("   4: 0100007F:1F90 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 400\n") // :8080 <- 127.0.0.1:40000 server side
+	b.WriteString("   5: 0100007F:9C40 0100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 401\n") // client side of the same session
 	writeFile("net/tcp", b.String())
 
 	writeFile("net/tcp6", hdr+"   0: "+strings.Repeat("0", 32)+":1F90 "+strings.Repeat("0", 32)+":0000 0A 00000000:00000000 00:00000000 00000000  1000        0 101\n") // [::]:8080 -> pid 1234
@@ -81,6 +83,12 @@ func writeFixtureProc(t *testing.T) string {
 		"fd/4":    "@symlink:socket:[101]",
 		"fd/7":    "@symlink:socket:[110]",
 		"fd/8":    "@symlink:socket:[999]", // links the :3000 socket too
+		"fd/9":    "@symlink:socket:[400]", // accepted session
+	})
+	linkFD(4567, map[string]string{
+		"status":  "Name:\tcurl\nUid:\t1000\t1000\t1000\t1000\n",
+		"cmdline": "curl\x00http://127.0.0.1:8080",
+		"fd/2":    "@symlink:socket:[401]", // client side of the session
 	})
 	linkFD(2345, map[string]string{
 		"status":  status2345,
@@ -119,9 +127,37 @@ func TestScanFixtureAggregatesPorts(t *testing.T) {
 		t.Errorf("non-listen rows must never count as unresolved: %d", got)
 	}
 
+	conns := snap.Connections(8080)
+	if len(conns) != 1 {
+		t.Fatalf("Connections(8080) = %+v, want one session", conns)
+	}
+	c := conns[0]
+	switch {
+	case c.State != "ESTABLISHED":
+		t.Errorf("session State = %q", c.State)
+	case c.PID != 1234:
+		t.Errorf("session server PID = %d, want 1234", c.PID)
+	case c.PeerPID != 4567:
+		t.Errorf("session client PID = %d, want 4567", c.PeerPID)
+	case c.RemotePort != 40000:
+		t.Errorf("session remote = %v:%d", c.Remote, c.RemotePort)
+	case c.Key != 400 || c.PeerKey != 401:
+		t.Errorf("session keys = %d/%d, want 400/401", c.Key, c.PeerKey)
+	}
+	out := snap.ConnectionsOf(4567)
+	if len(out) != 1 || out[0].PeerPID != 1234 {
+		t.Errorf("ConnectionsOf(4567) = %+v, want mirror with peer 1234", out)
+	}
+	if got := snap.ConnectionCount(8080); got != 1 {
+		t.Errorf("ConnectionCount(8080) = %d, want 1", got)
+	}
+
 	row8080, found := findRow(snap.Rows(0), 8080)
 	if !found {
 		t.Fatal("row for :8080 missing")
+	}
+	if row8080.Connections != 1 {
+		t.Errorf("row Connections = %d, want 1", row8080.Connections)
 	}
 	if got := row8080.Protos; !slices.Equal(got, []string{"tcp", "tcp6"}) {
 		t.Errorf("Protos = %v, want [tcp tcp6]", got)
@@ -213,6 +249,52 @@ func TestSnapshotIgnoresForeignInodesWhenUnmapped(t *testing.T) {
 	}
 	if got := snap.PIDs(3000); len(got) != 0 {
 		t.Errorf("PIDs(3000) = %v, want none", got)
+	}
+}
+
+// TestScanFindsOwnSessions opens a real loopback connection and verifies the
+// snapshot resolves both ends to this process.
+func TestScanFindsOwnSessions(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot bind: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Skipf("cannot dial: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	server, err := ln.Accept()
+	if err != nil {
+		t.Skipf("cannot accept: %v", err)
+	}
+	defer func() { _ = server.Close() }()
+
+	self := os.Getpid()
+	snap, err := Scan()
+	if err != nil {
+		t.Fatalf("real Scan failed: %v", err)
+	}
+
+	var found *Connection
+	for _, c := range snap.Connections(port) {
+		if c.State == "ESTABLISHED" && c.PID == self {
+			found = &c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no established session owned by pid %d on port %d: %+v",
+			self, port, snap.Connections(port))
+	}
+	if found.PeerPID != self {
+		t.Errorf("peer PID = %d, want %d (client runs in this process)", found.PeerPID, self)
+	}
+	if found.RemotePort == 0 {
+		t.Error("session has no remote endpoint")
 	}
 }
 

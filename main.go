@@ -34,6 +34,7 @@ usage:
   wpail -t [PORT]        same TUI, optionally filtered to PORT
   wpail [-u] PORT        print PID(s) listening on PORT (-u adds the owner column)
   wpail -v PORT          verbose: PID, owner, build metadata per listener
+  wpail -c PORT          list active sessions attached to PORT, with local peers
 
 exit codes:
   0  found / success     1  nothing found or scan error     2  usage error
@@ -48,6 +49,7 @@ func run(args []string) int {
 	tuiFlag := fs.Bool("t", false, "open the interactive terminal UI")
 	userFlag := fs.Bool("u", false, "report the owning user next to each PID")
 	verboseFlag := fs.Bool("v", false, "report build metadata (module, toolchain, VCS) per PID")
+	connFlag := fs.Bool("c", false, "list active sessions attached to PORT")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, usageText)
 		fs.PrintDefaults()
@@ -57,15 +59,19 @@ func run(args []string) int {
 	}
 
 	switch {
-	case *tuiFlag && *userFlag, *tuiFlag && *verboseFlag:
-		fmt.Fprintln(os.Stderr, "wpail: -t cannot be combined with -u or -v")
+	case *tuiFlag && (*userFlag || *verboseFlag || *connFlag):
+		fmt.Fprintln(os.Stderr, "wpail: -t cannot be combined with -u, -v or -c")
+		fs.Usage()
+		return 2
+	case *connFlag && (*userFlag || *verboseFlag):
+		fmt.Fprintln(os.Stderr, "wpail: -c cannot be combined with -u or -v")
 		fs.Usage()
 		return 2
 	case *userFlag && *verboseFlag:
 		fmt.Fprintln(os.Stderr, "wpail: -u and -v are mutually exclusive")
 		fs.Usage()
 		return 2
-	case *tuiFlag, fs.NArg() == 0 && !*userFlag && !*verboseFlag:
+	case *tuiFlag, fs.NArg() == 0 && !*userFlag && !*verboseFlag && !*connFlag:
 		// -t wins; bare wpail defaults to the interactive UI.
 		return tuiMode(fs)
 	default:
@@ -80,6 +86,12 @@ func run(args []string) int {
 			return 2
 		}
 		switch {
+		case *connFlag:
+			if !connectionsSupported {
+				fmt.Fprintln(os.Stderr, "wpail: -c is only implemented on Linux")
+				return 2
+			}
+			return runCLI(port, connections)
 		case *verboseFlag:
 			return runCLI(port, verbose)
 		case *userFlag:
@@ -126,6 +138,7 @@ const (
 	pidsOnly cliMode = iota
 	users
 	verbose
+	connections
 )
 
 func runCLI(port uint16, mode cliMode) int {
@@ -138,6 +151,9 @@ func runCLI(port uint16, mode cliMode) int {
 }
 
 func renderCLI(out, errW io.Writer, snap *listen.Snapshot, port uint16, mode cliMode) int {
+	if mode == connections {
+		return renderConnections(out, errW, snap, port)
+	}
 	pids := snap.PIDs(port)
 	if len(pids) == 0 {
 		if n := snap.Unresolved(port); n > 0 {
@@ -177,6 +193,95 @@ func printPIDs(w io.Writer, pids []int) error {
 		}
 	}
 	return nil
+}
+
+// renderConnections prints one row per session attached to port. The local
+// peer column names the program on the other end when it runs on this host.
+func renderConnections(out, errW io.Writer, snap *listen.Snapshot, port uint16) int {
+	conns := snap.Connections(port)
+	if len(conns) == 0 {
+		warnf(errW, "wpail: no active sessions on port %d\n", port)
+		return 1
+	}
+	cache := newBinCache()
+	headers := []string{"PROTO", "STATE", "LOCAL", "REMOTE", "PEER"}
+	rows := make([][]string, len(conns))
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len([]rune(h))
+	}
+	for i, c := range conns {
+		row := []string{
+			c.Proto,
+			c.State,
+			c.LocalAddr(),
+			c.RemoteAddr(),
+			peerLabel(c.PeerPID, cache),
+		}
+		rows[i] = row
+		for j, v := range row {
+			widths[j] = max(widths[j], len([]rune(v)))
+		}
+	}
+
+	hcells := make([]string, len(headers))
+	for i, h := range headers {
+		hcells[i] = pad(h, widths[i])
+	}
+	if _, err := fmt.Fprintln(out, strings.Join(hcells, "  ")); err != nil {
+		return 1
+	}
+	for _, row := range rows {
+		cells := make([]string, len(row))
+		for i, v := range row {
+			cells[i] = pad(v, widths[i])
+		}
+		if _, err := fmt.Fprintln(out, strings.Join(cells, "  ")); err != nil {
+			return 1
+		}
+	}
+	return 0
+}
+
+// peerLabel renders "name [pid]" for a local process, preferring the dev
+// build label (module path) over the executable name.
+func peerLabel(pid int, cache *binCache) string {
+	if pid <= 0 {
+		return "—"
+	}
+	proc, err := listen.Detail(pid)
+	if err != nil {
+		return fmt.Sprintf("pid %d", pid)
+	}
+	name := proc.Comm
+	if fields := strings.Fields(proc.Name()); len(fields) > 0 {
+		name = strings.TrimSuffix(filepath.Base(fields[0]), ":")
+	}
+	if bi := cache.probe(proc); bi.Dev {
+		name = devLabel(bi)
+	}
+	if name == "" {
+		name = "?"
+	}
+	return fmt.Sprintf("%s [%d]", name, pid)
+}
+
+// connRefs adapts snapshot sessions to the TUI detail model.
+func connRefs(conns []listen.Connection, cache *binCache) []tui.ConnRef {
+	refs := make([]tui.ConnRef, 0, len(conns))
+	for _, c := range conns {
+		ref := tui.ConnRef{
+			Proto:  c.Proto,
+			State:  c.State,
+			Local:  c.LocalAddr(),
+			Remote: c.RemoteAddr(),
+		}
+		if c.PeerPID != 0 {
+			ref.Peer = peerLabel(c.PeerPID, cache)
+		}
+		refs = append(refs, ref)
+	}
+	return refs
 }
 
 // binCache memoizes binary metadata per executable path so periodic
@@ -469,6 +574,7 @@ var startTUI = func(port uint16) int {
 					Port:  r.Port,
 					Proto: strings.Join(r.Protos, "+"),
 					Addr:  strings.Join(r.Addrs, ", "),
+					Conns: r.Connections,
 					PIDs:  r.PIDs,
 					Name:  firstNonEmpty(r.Names, "?"),
 					User:  firstNonEmpty(r.Users, "?"),
@@ -498,21 +604,18 @@ var startTUI = func(port uint16) int {
 				defer mu.Unlock()
 				return lastSnap
 			}()
-			socks := []listen.Socket{}
-			switch {
-			case snap != nil:
-				socks = snap.Owned(pid)
-			default:
-				if fresh, ferr := listen.Scan(); ferr == nil {
-					socks = fresh.Owned(pid)
-				}
+			if snap == nil {
+				snap, _ = listen.Scan()
 			}
-			for _, sk := range socks {
-				d.Ports = append(d.Ports, tui.BoundPort{
-					Proto: sk.Proto,
-					Addr:  listen.FormatIP(sk.Local),
-					Port:  sk.Port,
-				})
+			if snap != nil {
+				for _, sk := range snap.Owned(pid) {
+					d.Ports = append(d.Ports, tui.BoundPort{
+						Proto: sk.Proto,
+						Addr:  listen.FormatIP(sk.Local),
+						Port:  sk.Port,
+					})
+				}
+				d.Conns = connRefs(snap.ConnectionsOf(pid), cache)
 			}
 			sortPorts(d.Ports)
 			return d, nil

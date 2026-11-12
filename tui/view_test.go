@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,32 @@ func TestDetailRendersBuildBlock(t *testing.T) {
 	empty := m.detailText(&Detail{PID: 42})
 	if strings.Contains(empty, "Build") {
 		t.Errorf("build block must be absent without metadata:\n%s", empty)
+	}
+}
+
+func TestDetailRendersConnections(t *testing.T) {
+	m := newModel(Config{})
+	conns := make([]ConnRef, maxDetailConns+2)
+	for i := range conns {
+		conns[i] = ConnRef{
+			Proto:  "tcp",
+			State:  "ESTABLISHED",
+			Local:  "127.0.0.1:8080",
+			Remote: fmt.Sprintf("10.0.0.%d:5555", i),
+			Peer:   "curl (200)",
+		}
+	}
+	out := m.detailText(&Detail{PID: 42, Conns: conns})
+	for _, want := range []string{
+		"Connections", "ESTABLISHED", "127.0.0.1:8080", "10.0.0.0:5555",
+		"curl (200)", "… 2 more",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail view missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(m.detailText(&Detail{PID: 42}), "Connections") {
+		t.Error("connections block must be absent without sessions")
 	}
 }
 

@@ -60,7 +60,7 @@ func TestHexIP(t *testing.T) {
 	}
 }
 
-func TestParseTableTCPKeepsListenersOnly(t *testing.T) {
+func TestParseTableTCPKeepsSessions(t *testing.T) {
 	const table = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 100
    1: 0100007F:1F91 0100007F:1F92 01 00000000:00000000 00:00000000 00000000  1000        0 101
@@ -72,8 +72,8 @@ func TestParseTableTCPKeepsListenersOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("expected only the LISTEN row with an inode, got %+v", got)
+	if len(got) != 3 {
+		t.Fatalf("expected the LISTEN and both session rows, got %+v", got)
 	}
 	s := got[0]
 	switch {
@@ -85,21 +85,42 @@ func TestParseTableTCPKeepsListenersOnly(t *testing.T) {
 		t.Errorf("UID = %d, want 1000", s.UID)
 	case s.Proto != "tcp":
 		t.Errorf("Proto = %q, want tcp", s.Proto)
+	case s.State != "LISTEN":
+		t.Errorf("State = %q, want LISTEN", s.State)
 	case !s.Local.To4().Equal(net.IPv4zero):
 		t.Errorf("Local = %v, want 0.0.0.0", s.Local)
+	}
+
+	est := got[1]
+	switch {
+	case est.State != "ESTABLISHED":
+		t.Errorf("session State = %q, want ESTABLISHED", est.State)
+	case est.Port != 8081 || !est.Local.Equal(net.IPv4(127, 0, 0, 1)):
+		t.Errorf("session local = %v:%d", est.Local, est.Port)
+	case est.RemotePort != 8082 || !est.Remote.Equal(net.IPv4(127, 0, 0, 1)):
+		t.Errorf("session remote = %v:%d", est.Remote, est.RemotePort)
+	case est.Key != 101:
+		t.Errorf("session Key = %d, want 101", est.Key)
 	}
 }
 
 func TestParseTableUDPKeepsAllStates(t *testing.T) {
 	const table = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
    0: 00000000:14E9 00000000:0000 07 00000000:00000000 00:00000000 00000000   105        0 300
+   1: 0100007F:14E9 0100007F:0035 01 00000000:00000000 00:00000000 00000000   105        0 301
 `
 	got, err := parseTable(strings.NewReader(table), "udp", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Proto != "udp" || got[0].Key != 300 || got[0].UID != 105 {
-		t.Fatalf("unexpected parse result: %+v (err=%v)", got, err)
+	if len(got) != 2 {
+		t.Fatalf("expected both bound and connected UDP rows, got %+v", got)
+	}
+	if got[0].Proto != "udp" || got[0].Key != 300 || got[0].UID != 105 || got[0].State != "UNCONN" {
+		t.Fatalf("unexpected unconnected row: %+v", got[0])
+	}
+	if got[1].State != "ESTABLISHED" || got[1].RemotePort != 53 {
+		t.Fatalf("unexpected connected row: %+v", got[1])
 	}
 }
 

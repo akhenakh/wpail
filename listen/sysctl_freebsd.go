@@ -219,7 +219,7 @@ func scanSysctl() (*Snapshot, error) {
 	for pid := range owners {
 		sortSockets(owners[pid])
 	}
-	return newSnapshot(sockets, owners, Detail), nil
+	return newSnapshot(sockets, nil, owners, Detail), nil
 }
 
 // sysctlRawRetry reads a variable-length sysctl, retrying if the table grows

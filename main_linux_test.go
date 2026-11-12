@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,51 @@ func TestRenderCLIPrintsOwnedPIDsAndFlagStrangers(t *testing.T) {
 	}
 	if !strings.Contains(errW.String(), "additional socket(s)") {
 		t.Errorf("coexisting foreign socket must be flagged: %q", errW.String())
+	}
+}
+
+func TestRenderConnectionsFromFixture(t *testing.T) {
+	root := writeProcFixture(t,
+		// 127.0.0.1:8080 <- 127.0.0.1:40000, server side owned by pid 1234.
+		"   0: 0100007F:1F90 0100007F:9C40 01 00000000:00000000 00:00000000 00000000  1000        0 400\n",
+		// Client side of the same session, owned by pid 999999.
+		"   1: 0100007F:9C40 0100007F:1F90 01 00000000:00000000 00:00000000 00000000  1000        0 401\n",
+	)
+	mkPID := func(pid int, inode int) {
+		fdDir := filepath.Join(root, fmt.Sprint(pid), "fd")
+		if err := os.MkdirAll(fdDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(fmt.Sprintf("socket:[%d]", inode), filepath.Join(fdDir, "3")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkPID(1234, 400)
+	mkPID(999999, 401)
+
+	snap, err := listen.ScanAt(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errW bytes.Buffer
+	if code := renderCLI(&out, &errW, snap, 8080, connections); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errW.String())
+	}
+	got := out.String()
+	for _, want := range []string{"PROTO", "STATE", "REMOTE", "PEER",
+		"tcp", "ESTABLISHED", "127.0.0.1:8080", "127.0.0.1:40000", "pid 999999"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("connection report missing %q:\n%s", want, got)
+		}
+	}
+
+	var empty bytes.Buffer
+	if code := renderCLI(&empty, &errW, snap, 8081, connections); code != 1 {
+		t.Errorf("empty port exit = %d, want 1", code)
+	}
+	if !strings.Contains(errW.String(), "no active sessions") {
+		t.Errorf("missing empty-session message: %q", errW.String())
 	}
 }
 

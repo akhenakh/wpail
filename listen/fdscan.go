@@ -9,17 +9,20 @@ import (
 	"strings"
 )
 
-// owners maps every listening socket to the processes holding it open by
-// walking /proc/[pid]/fd and resolving socket:[inode] symlinks. Directories
-// of processes we lack permission to read are skipped silently, matching
+// ownersAt maps every socket to the processes holding it open by walking
+// /proc/[pid]/fd and resolving socket:[inode] symlinks. Directories of
+// processes we lack permission to read are skipped silently, matching
 // lsof/ss behaviour for unprivileged users.
-func ownersAt(root string, socks []Socket) map[int][]Socket {
-	byInode := make(map[uint64][]Socket, len(socks))
+func ownersAt(root string, socks []socketInfo) map[int][]socketInfo {
+	byInode := make(map[uint64][]socketInfo, len(socks))
 	for _, s := range socks {
+		if s.Key == 0 {
+			continue // TIME_WAIT rows have no owner inode
+		}
 		byInode[s.Key] = append(byInode[s.Key], s)
 	}
 
-	res := make(map[int][]Socket)
+	res := make(map[int][]socketInfo)
 	dirs, err := os.ReadDir(root)
 	if err != nil {
 		return res
@@ -45,9 +48,6 @@ func ownersAt(root string, socks []Socket) map[int][]Socket {
 			}
 			res[pid] = append(res[pid], byInode[inode]...)
 		}
-	}
-	for pid := range res {
-		sortSockets(res[pid])
 	}
 	return res
 }
